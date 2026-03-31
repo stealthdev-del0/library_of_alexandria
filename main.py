@@ -544,6 +544,15 @@ def confirm_action(message: str) -> bool:
     return reply in YES_VALUES
 
 
+def prompt_apply_skip_cancel(message: str) -> str:
+    reply = input(f"{message} [y/N/c]: ").strip().lower()
+    if reply in {"c", "cancel"}:
+        return "cancel"
+    if reply in YES_VALUES:
+        return "apply"
+    return "skip"
+
+
 @contextmanager
 def spinner(message: str):
     if not SHOW_MOTION:
@@ -3330,6 +3339,16 @@ def print_dashboard(library: Library) -> None:
     print()
 
 
+def _print_detail_block(label: str, value: str | None) -> None:
+    print(f"  {label}:")
+    text = str(value or "").strip()
+    if not text:
+        print("    -")
+        return
+    for line in text.splitlines():
+        print(f"    {line}")
+
+
 def print_book_details(book: Book) -> None:
     print(themed("Item Details", "accent", bold=True))
     print(f"  ID:        {book.book_id or '-'}")
@@ -3347,6 +3366,8 @@ def print_book_details(book: Book) -> None:
         print(f"  Publisher: {book.publisher or '-'}")
         print(f"  Practice:  {book.practice_status or '-'}")
         print(f"  Last prac: {book.last_practiced or '-'}")
+        print(f"  Tempo tgt: {book.tempo_target_bpm if book.tempo_target_bpm is not None else '-'}")
+        print(f"  Practiced: {str(book.practice_minutes_total) + ' min' if book.practice_minutes_total is not None else '-'}")
     print(f"  ISBN:      {book.isbn or '-'}")
     print(f"  Year:      {book.year if book.year is not None else '-'}")
     print(f"  Genre:     {book.genre or '-'}")
@@ -3357,10 +3378,14 @@ def print_book_details(book: Book) -> None:
     print(f"  Rating:    {book.rating if book.rating is not None else '-'}")
     print(f"  Read:      {'yes' if book.read else 'no'}")
     print(f"  Location:  {book.location}")
+    print(f"  Series:    {book.series_name or '-'}")
+    print(f"  Series #:  {book.series_index if book.series_index is not None else '-'}")
     print(f"  Tags:      {', '.join(book.tags) if book.tags else '-'}")
+    print(f"  AI Tags:   {', '.join(book.ai_tags) if book.ai_tags else '-'}")
     print(f"  Finished:  {book.read_at or '-'}")
-    print("  Notes:")
-    print(f"    {book.notes or '-'}")
+    _print_detail_block("AI Summary", book.ai_summary)
+    _print_detail_block("AI Author", book.ai_author_note)
+    _print_detail_block("Notes", book.notes)
     print()
 
 
@@ -6058,6 +6083,9 @@ def ai_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
         tail = _command_tail(raw_cmd, "ai enrich").strip()
         if not tail:
             tail = input("Target (reference/all): ").strip()
+        if tail.lower() in {"c", "cancel"}:
+            print_result("AI enrich", "Canceled")
+            return
         if not tail:
             print_status("Usage: ai enrich [reference|all]", "warn")
             return
@@ -6069,19 +6097,31 @@ def ai_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
                 print_status("Item not found.", "warn")
                 return
             targets = [selected]
+        if not targets:
+            print_status("No items available for enrichment.", "info")
+            return
         snapshot = library.export_state()
         updated = 0
         skipped = 0
-        with spinner("Generating AI enrichments"):
-            for book in targets:
-                generated = _ollama_enrich_book(book, model_name)
+        aborted = False
+        try:
+            for index, book in enumerate(targets, 1):
+                with spinner(f"Generating AI enrichment ({index}/{len(targets)})"):
+                    generated = _ollama_enrich_book(book, model_name)
                 if generated is None:
                     generated = _fallback_ai_description(book)
                 summary, author_note, ai_tags = generated
                 preview = f"summary='{truncate(summary, 56)}', tags={', '.join(ai_tags[:5]) or '-'}"
-                if safe_mode and not confirm_action(f"Apply AI enrichment to {book.book_id} ({book.title}) -> {preview}?"):
-                    skipped += 1
-                    continue
+                if safe_mode:
+                    decision = prompt_apply_skip_cancel(
+                        f"Apply AI enrichment to {book.book_id} ({book.title}) -> {preview}?"
+                    )
+                    if decision == "cancel":
+                        aborted = True
+                        break
+                    if decision == "skip":
+                        skipped += 1
+                        continue
                 try:
                     changed = library.edit_book(
                         book.book_id,
@@ -6096,8 +6136,15 @@ def ai_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
                     updated += 1
                 else:
                     skipped += 1
+        except KeyboardInterrupt:
+            print()
+            aborted = True
         if updated > 0:
             push_undo(undo_stack, snapshot)
+        if aborted:
+            remaining = max(0, len(targets) - updated - skipped)
+            print_result("AI enrich", "Canceled", f"updated={updated}, skipped={skipped}, remaining={remaining}")
+        elif updated > 0:
             print_result("AI enrich", "Updated", f"updated={updated}, skipped={skipped}")
         else:
             print_result("AI enrich", "No change", f"skipped={skipped}")
