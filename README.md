@@ -31,6 +31,13 @@ Recommended (no Python packaging dependencies):
 ./install.sh
 ```
 
+`install.sh` now also checks and installs:
+
+- `Ollama`
+- `Obsidian`
+
+on supported systems (macOS via Homebrew casks; Linux via supported installers).
+
 Then start it anywhere with:
 
 ```bash
@@ -47,6 +54,12 @@ Optional alternative (if `setuptools` is installed):
 
 ```bash
 python3 -m pip install --user --no-build-isolation .
+```
+
+If you want to skip auto-install of Ollama/Obsidian:
+
+```bash
+LOA_INSTALL_DEPS=0 ./install.sh
 ```
 
 ## Data Safety
