@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import copy
+import difflib
 import json
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -115,6 +116,19 @@ def _normalize_goal(value: Any) -> int | None:
     return amount
 
 
+def _optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_tags(value: Any) -> list[str]:
     if value is None:
         return []
@@ -199,6 +213,13 @@ class Book:
         publisher: str = "",
         practice_status: str = "",
         last_practiced: str | None = None,
+        series_name: str = "",
+        series_index: int | None = None,
+        ai_summary: str = "",
+        ai_author_note: str = "",
+        ai_tags: list[str] | tuple[str, ...] | set[str] | str | None = None,
+        tempo_target_bpm: int | None = None,
+        practice_minutes_total: int | None = None,
     ):
         self.book_id = str(book_id).strip()
         self.title = title.strip()
@@ -232,6 +253,13 @@ class Book:
         self.duration_minutes = _optional_int(duration_minutes) if self.item_type == "SheetMusic" else None
         if self.duration_minutes is not None and self.duration_minutes < 0:
             self.duration_minutes = None
+        self.tempo_target_bpm = _optional_int(tempo_target_bpm) if self.item_type == "SheetMusic" else None
+        if self.tempo_target_bpm is not None and self.tempo_target_bpm < 0:
+            self.tempo_target_bpm = None
+        total_minutes = _optional_int(practice_minutes_total) if self.item_type == "SheetMusic" else None
+        if total_minutes is not None and total_minutes < 0:
+            total_minutes = 0
+        self.practice_minutes_total = total_minutes if self.item_type == "SheetMusic" else None
         if self.item_type == "SheetMusic":
             normalized_status = _normalize_practice_status(practice_status)
             self.practice_status = normalized_status or "Unstarted"
@@ -239,6 +267,14 @@ class Book:
         else:
             self.practice_status = ""
             self.last_practiced = None
+
+        self.series_name = str(series_name).strip()
+        self.series_index = _optional_int(series_index)
+        if self.series_index is not None and self.series_index <= 0:
+            self.series_index = None
+        self.ai_summary = str(ai_summary).strip()
+        self.ai_author_note = str(ai_author_note).strip()
+        self.ai_tags = _normalize_tags(ai_tags)
 
         self.rating = _optional_int(rating)
         if self.rating is not None and not (1 <= self.rating <= 5):
@@ -311,6 +347,13 @@ class Book:
             publisher=str(payload.get("publisher", "")).strip(),
             practice_status=str(payload.get("practice_status", "")).strip(),
             last_practiced=payload.get("last_practiced"),
+            series_name=str(payload.get("series_name", "")).strip(),
+            series_index=payload.get("series_index"),
+            ai_summary=str(payload.get("ai_summary", "")).strip(),
+            ai_author_note=str(payload.get("ai_author_note", "")).strip(),
+            ai_tags=payload.get("ai_tags", []),
+            tempo_target_bpm=payload.get("tempo_target_bpm"),
+            practice_minutes_total=payload.get("practice_minutes_total"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -342,6 +385,13 @@ class Book:
             "publisher": self.publisher,
             "practice_status": self.practice_status,
             "last_practiced": self.last_practiced,
+            "series_name": self.series_name,
+            "series_index": self.series_index,
+            "ai_summary": self.ai_summary,
+            "ai_author_note": self.ai_author_note,
+            "ai_tags": self.ai_tags,
+            "tempo_target_bpm": self.tempo_target_bpm,
+            "practice_minutes_total": self.practice_minutes_total,
         }
 
     def progress_label(self) -> str:
@@ -388,6 +438,9 @@ class Library:
         self.goals: dict[str, int | None] = {"monthly": None, "yearly": None}
         self.smart_lists: dict[str, dict[str, Any]] = {}
         self.recommendation_profile: dict[str, Any] = self._default_recommendation_profile()
+        self.inbox: list[dict[str, Any]] = []
+        self.sessions: list[dict[str, Any]] = []
+        self.ai_settings: dict[str, Any] = {"safe_mode": True, "model": "llama3.2"}
         self.data_path = Path(data_path).expanduser() if data_path else None
 
     def _next_book_id(self, used_ids: set[str] | None = None) -> str:
@@ -595,7 +648,16 @@ class Library:
 
     def _deserialize_payload(
         self, payload: Any
-    ) -> tuple[list[Book], list[str], dict[str, int | None], dict[str, dict[str, Any]], dict[str, Any]]:
+    ) -> tuple[
+        list[Book],
+        list[str],
+        dict[str, int | None],
+        dict[str, dict[str, Any]],
+        dict[str, Any],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        dict[str, Any],
+    ]:
         if not isinstance(payload, dict):
             raise ValueError("Library data must be a JSON object.")
 
@@ -667,15 +729,79 @@ class Library:
         except ValueError:
             recommendation_profile = self._default_recommendation_profile()
 
-        return books, reading_list, goals, smart_lists, recommendation_profile
+        inbox_items: list[dict[str, Any]] = []
+        raw_inbox = payload.get("inbox", [])
+        if isinstance(raw_inbox, list):
+            for item in raw_inbox:
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text", "")).strip()
+                if not text:
+                    continue
+                inbox_items.append(
+                    {
+                        "id": str(item.get("id", "")).strip() or f"inbox_{len(inbox_items) + 1:04d}",
+                        "text": text,
+                        "created_at": _optional_date(item.get("created_at")) or date.today().isoformat(),
+                        "status": str(item.get("status", "open")).strip().lower() or "open",
+                    }
+                )
+
+        sessions: list[dict[str, Any]] = []
+        raw_sessions = payload.get("sessions", [])
+        if isinstance(raw_sessions, list):
+            for item in raw_sessions:
+                if not isinstance(item, dict):
+                    continue
+                session_id = str(item.get("id", "")).strip() or f"s{len(sessions) + 1:06d}"
+                ref = str(item.get("book_id", "")).strip()
+                when = _optional_date(item.get("date")) or date.today().isoformat()
+                minutes = _optional_int(item.get("minutes"))
+                if minutes is None or minutes <= 0:
+                    continue
+                kind = str(item.get("kind", "reading")).strip().lower() or "reading"
+                done = _to_bool(item.get("done", True))
+                bpm = _optional_int(item.get("bpm"))
+                sessions.append(
+                    {
+                        "id": session_id,
+                        "book_id": ref,
+                        "date": when,
+                        "minutes": minutes,
+                        "kind": kind,
+                        "done": done,
+                        "bpm": bpm,
+                    }
+                )
+
+        raw_ai_settings = payload.get("ai_settings", {})
+        ai_settings = {"safe_mode": True, "model": "llama3.2"}
+        if isinstance(raw_ai_settings, dict):
+            ai_settings["safe_mode"] = _to_bool(raw_ai_settings.get("safe_mode", True))
+            model = str(raw_ai_settings.get("model", "llama3.2")).strip()
+            ai_settings["model"] = model or "llama3.2"
+
+        return books, reading_list, goals, smart_lists, recommendation_profile, inbox_items, sessions, ai_settings
 
     def _apply_state(self, payload: Any) -> None:
-        books, reading_list, goals, smart_lists, recommendation_profile = self._deserialize_payload(payload)
+        (
+            books,
+            reading_list,
+            goals,
+            smart_lists,
+            recommendation_profile,
+            inbox_items,
+            sessions,
+            ai_settings,
+        ) = self._deserialize_payload(payload)
         self.books = books
         self.reading_list = reading_list
         self.goals = goals
         self.smart_lists = smart_lists
         self.recommendation_profile = recommendation_profile
+        self.inbox = inbox_items
+        self.sessions = sessions
+        self.ai_settings = ai_settings
 
     def load_from_disk(self) -> None:
         if not self.data_path:
@@ -695,12 +821,15 @@ class Library:
 
     def _payload(self) -> dict[str, Any]:
         return {
-            "version": 8,
+            "version": 9,
             "books": [book.to_dict() for book in self.books],
             "reading_list": self.reading_list,
             "goals": self.goals,
             "smart_lists": self.smart_lists,
             "recommendation_profile": self.recommendation_profile,
+            "inbox": self.inbox,
+            "sessions": self.sessions,
+            "ai_settings": self.ai_settings,
         }
 
     def export_state(self) -> dict[str, Any]:
@@ -935,6 +1064,13 @@ class Library:
             publisher=str(updates.get("publisher", current.publisher)).strip(),
             practice_status=str(updates.get("practice_status", current.practice_status)).strip(),
             last_practiced=updates.get("last_practiced", current.last_practiced),
+            series_name=str(updates.get("series_name", current.series_name)).strip(),
+            series_index=updates.get("series_index", current.series_index),
+            ai_summary=str(updates.get("ai_summary", current.ai_summary)).strip(),
+            ai_author_note=str(updates.get("ai_author_note", current.ai_author_note)).strip(),
+            ai_tags=updates.get("ai_tags", current.ai_tags),
+            tempo_target_bpm=updates.get("tempo_target_bpm", current.tempo_target_bpm),
+            practice_minutes_total=updates.get("practice_minutes_total", current.practice_minutes_total),
         )
         if not updated.title or not updated.author:
             raise ValueError("Title and author may not be empty.")
@@ -1708,12 +1844,18 @@ class Library:
             raw_reading = payload.get("reading_list")
             raw_smart_lists = payload.get("smart_lists")
             raw_recommendation_profile = payload.get("recommendation_profile")
+            raw_inbox = payload.get("inbox")
+            raw_sessions = payload.get("sessions")
+            raw_ai_settings = payload.get("ai_settings")
         elif isinstance(payload, list):
             raw_books = payload
             raw_goals = None
             raw_reading = None
             raw_smart_lists = None
             raw_recommendation_profile = None
+            raw_inbox = None
+            raw_sessions = None
+            raw_ai_settings = None
         else:
             raise ValueError("Import file must contain an object or a list.")
 
@@ -1791,6 +1933,55 @@ class Library:
                 if profile != self.recommendation_profile:
                     self.recommendation_profile = profile
                     changed_metadata = True
+            if isinstance(raw_inbox, list):
+                inbox_items: list[dict[str, Any]] = []
+                for item in raw_inbox:
+                    if not isinstance(item, dict):
+                        continue
+                    text = str(item.get("text", "")).strip()
+                    if not text:
+                        continue
+                    inbox_items.append(
+                        {
+                            "id": str(item.get("id", "")).strip() or f"inbox_{len(inbox_items) + 1:04d}",
+                            "text": text,
+                            "created_at": _optional_date(item.get("created_at")) or date.today().isoformat(),
+                            "status": str(item.get("status", "open")).strip().lower() or "open",
+                        }
+                    )
+                if inbox_items != self.inbox:
+                    self.inbox = inbox_items
+                    changed_metadata = True
+            if isinstance(raw_sessions, list):
+                sessions: list[dict[str, Any]] = []
+                for item in raw_sessions:
+                    if not isinstance(item, dict):
+                        continue
+                    minutes = _optional_int(item.get("minutes"))
+                    if minutes is None or minutes <= 0:
+                        continue
+                    sessions.append(
+                        {
+                            "id": str(item.get("id", "")).strip() or f"s{len(sessions) + 1:06d}",
+                            "book_id": str(item.get("book_id", "")).strip(),
+                            "date": _optional_date(item.get("date")) or date.today().isoformat(),
+                            "minutes": minutes,
+                            "kind": str(item.get("kind", "reading")).strip().lower() or "reading",
+                            "done": _to_bool(item.get("done", True)),
+                            "bpm": _optional_int(item.get("bpm")),
+                        }
+                    )
+                if sessions != self.sessions:
+                    self.sessions = sessions
+                    changed_metadata = True
+            if isinstance(raw_ai_settings, dict):
+                ai_settings = {
+                    "safe_mode": _to_bool(raw_ai_settings.get("safe_mode", True)),
+                    "model": str(raw_ai_settings.get("model", "llama3.2")).strip() or "llama3.2",
+                }
+                if ai_settings != self.ai_settings:
+                    self.ai_settings = ai_settings
+                    changed_metadata = True
             if changed_metadata:
                 metadata_updated = 1
 
@@ -1814,3 +2005,756 @@ class Library:
             "invalid": invalid,
             "metadata_updated": metadata_updated,
         }
+
+    def set_ai_settings(self, *, safe_mode: bool | None = None, model: str | None = None) -> bool:
+        next_safe = self.ai_settings.get("safe_mode", True) if safe_mode is None else bool(safe_mode)
+        next_model = str(model or self.ai_settings.get("model", "llama3.2")).strip() or "llama3.2"
+
+        def mutate():
+            if self.ai_settings.get("safe_mode") == next_safe and self.ai_settings.get("model") == next_model:
+                return False
+            self.ai_settings = {"safe_mode": next_safe, "model": next_model}
+            return True
+
+        return self._commit(mutate)
+
+    def _recommendation_breakdown(
+        self,
+        book: Book,
+        profile: dict[str, Any],
+        profile_active: bool,
+    ) -> tuple[float, list[str]]:
+        reasons: list[str] = []
+        if profile.get("prefer_unread", True) and book.read:
+            return -1.0, ["already read while profile prefers unread"]
+
+        score = 0.0
+        if not profile_active:
+            if not book.read:
+                score += 1.0
+                reasons.append("unread bonus")
+            else:
+                score -= 0.5
+            if book.rating is not None:
+                rating_bonus = book.rating / 10.0
+                score += rating_bonus
+                reasons.append(f"rating bonus ({book.rating}/5)")
+            if book.progress_pages:
+                score += 0.1
+                reasons.append("existing progress")
+            return score, reasons
+
+        genre_key = (book.genre or "").casefold()
+        creator_key = (book.composer or book.author).casefold()
+        tag_set = {tag.casefold() for tag in book.tags}
+
+        genres = set(profile.get("genres", []))
+        if genres:
+            if any(token in genre_key for token in genres):
+                score += 4.0
+                reasons.append("genre match")
+            elif genre_key:
+                score -= 0.5
+
+        creators = set(profile.get("authors", []))
+        if creators:
+            if any(token in creator_key for token in creators):
+                score += 4.0
+                reasons.append("author/composer match")
+            else:
+                score -= 0.5
+
+        wanted_tags = set(profile.get("tags", []))
+        if wanted_tags:
+            match_count = len(wanted_tags.intersection(tag_set))
+            if match_count > 0:
+                tag_score = min(7.0, 2.5 * match_count)
+                score += tag_score
+                reasons.append(f"tag matches ({match_count})")
+            else:
+                score -= 0.5
+
+        preferred_location = profile.get("location")
+        if preferred_location:
+            if book.location == preferred_location:
+                score += 2.0
+                reasons.append(f"location match ({preferred_location})")
+            else:
+                score -= 1.0
+
+        min_rating = profile.get("min_rating")
+        if min_rating is not None:
+            if book.rating is None:
+                score -= 1.5
+            elif book.rating < min_rating:
+                score -= 3.0
+            else:
+                gain = 1.0 + ((book.rating - min_rating + 1) * 0.5)
+                score += gain
+                reasons.append(f"rating >= profile minimum ({book.rating}/{min_rating})")
+        elif book.rating is not None:
+            score += book.rating / 10.0
+            reasons.append(f"rating support ({book.rating}/5)")
+
+        if not book.read:
+            score += 1.0
+            reasons.append("unread bonus")
+        return score, reasons
+
+    def recommend_books_with_reasons(
+        self,
+        limit: int = 10,
+        include_existing_reading: bool = False,
+    ) -> list[dict[str, Any]]:
+        amount = _optional_int(limit)
+        if amount is None or amount <= 0:
+            raise ValueError("Recommendation limit must be a positive integer.")
+
+        profile = self.get_recommendation_profile()
+        profile_active = bool(
+            profile.get("genres")
+            or profile.get("tags")
+            or profile.get("authors")
+            or profile.get("min_rating") is not None
+            or profile.get("location")
+        )
+        existing = {item.casefold() for item in self.reading_list}
+        candidates = [
+            book
+            for book in self.books
+            if include_existing_reading or not (book.book_id and book.book_id.casefold() in existing)
+        ]
+
+        scored: list[tuple[float, Book, list[str]]] = []
+        for book in candidates:
+            score, reasons = self._recommendation_breakdown(book, profile, profile_active)
+            if score <= 0:
+                continue
+            scored.append((score, book, reasons))
+
+        scored.sort(
+            key=lambda item: (
+                -item[0],
+                item[1].read,
+                -(item[1].rating if item[1].rating is not None else 0),
+                item[1].title.casefold(),
+            )
+        )
+        return [
+            {"book": book, "score": round(score, 3), "reasons": reasons}
+            for score, book, reasons in scored[:amount]
+        ]
+
+    def create_reading_plan(self, available_minutes_per_week: int, weeks: int = 4) -> list[dict[str, Any]]:
+        weekly_minutes = _optional_int(available_minutes_per_week)
+        week_count = _optional_int(weeks)
+        if weekly_minutes is None or weekly_minutes <= 0:
+            raise ValueError("available_minutes_per_week must be a positive integer.")
+        if week_count is None or week_count <= 0:
+            raise ValueError("weeks must be a positive integer.")
+
+        pages_per_hour = 40.0
+        weekly_capacity_pages = int(round((weekly_minutes / 60.0) * pages_per_hour))
+        if weekly_capacity_pages <= 0:
+            weekly_capacity_pages = 1
+
+        reading_candidates = self.reading_list_books()
+        if not reading_candidates:
+            reading_candidates = [book for book in self.books if not book.read]
+            reading_candidates.sort(
+                key=lambda book: (
+                    -(book.rating if book.rating is not None else 0),
+                    book.title.casefold(),
+                )
+            )
+
+        workload: list[dict[str, Any]] = []
+        for book in reading_candidates:
+            if book.pages and book.pages > 0:
+                current = book.progress_pages if book.progress_pages is not None else 0
+                remaining_pages = max(0, book.pages - current)
+            elif book.read:
+                remaining_pages = 0
+            else:
+                remaining_pages = 60
+            if remaining_pages <= 0:
+                continue
+            workload.append({"book": book, "remaining_pages": remaining_pages})
+
+        plan: list[dict[str, Any]] = []
+        pointer = 0
+        for week_index in range(1, week_count + 1):
+            capacity = weekly_capacity_pages
+            entries: list[dict[str, Any]] = []
+            while capacity > 0 and pointer < len(workload):
+                item = workload[pointer]
+                remaining = item["remaining_pages"]
+                allocation = min(capacity, remaining)
+                if allocation <= 0:
+                    pointer += 1
+                    continue
+                book = item["book"]
+                entries.append(
+                    {
+                        "book_id": book.book_id,
+                        "title": book.title,
+                        "author": book.author,
+                        "planned_pages": allocation,
+                    }
+                )
+                item["remaining_pages"] -= allocation
+                capacity -= allocation
+                if item["remaining_pages"] <= 0:
+                    pointer += 1
+            plan.append(
+                {
+                    "week": week_index,
+                    "capacity_pages": weekly_capacity_pages,
+                    "planned_pages": weekly_capacity_pages - capacity,
+                    "entries": entries,
+                }
+            )
+            if pointer >= len(workload):
+                break
+        return plan
+
+    def find_potential_duplicates(self, threshold: float = 0.88) -> list[dict[str, Any]]:
+        level = _optional_float(threshold)
+        if level is None:
+            level = 0.88
+        level = max(0.5, min(0.99, level))
+
+        findings: list[dict[str, Any]] = []
+        books = self.books[:]
+        for left_index, left in enumerate(books):
+            for right in books[left_index + 1 :]:
+                if left.item_type != right.item_type:
+                    continue
+                left_creator = (left.composer or left.author).strip().casefold()
+                right_creator = (right.composer or right.author).strip().casefold()
+                title_ratio = difflib.SequenceMatcher(None, left.title.casefold(), right.title.casefold()).ratio()
+                creator_ratio = difflib.SequenceMatcher(None, left_creator, right_creator).ratio()
+                if left.isbn and right.isbn and left.isbn == right.isbn:
+                    score = 1.0
+                    reason = "same ISBN"
+                else:
+                    score = (title_ratio * 0.7) + (creator_ratio * 0.3)
+                    reason = f"title≈{title_ratio:.2f}, creator≈{creator_ratio:.2f}"
+                if score < level:
+                    continue
+                findings.append(
+                    {
+                        "left_id": left.book_id,
+                        "right_id": right.book_id,
+                        "left_title": left.title,
+                        "right_title": right.title,
+                        "score": round(score, 3),
+                        "reason": reason,
+                    }
+                )
+        findings.sort(key=lambda item: (-item["score"], str(item["left_id"]).casefold(), str(item["right_id"]).casefold()))
+        return findings
+
+    def merge_items(self, primary_reference: str, duplicate_reference: str) -> bool:
+        primary = self.get_by_reference(primary_reference)
+        duplicate = self.get_by_reference(duplicate_reference)
+        if not primary or not duplicate or primary is duplicate:
+            return False
+
+        merged_tags = _normalize_tags([*primary.tags, *duplicate.tags])
+        merged_ai_tags = _normalize_tags([*primary.ai_tags, *duplicate.ai_tags])
+        merged_notes = primary.notes
+        if duplicate.notes and duplicate.notes not in merged_notes:
+            merged_notes = (merged_notes + "\n\n" + duplicate.notes).strip() if merged_notes else duplicate.notes
+
+        updated = Book(
+            title=primary.title or duplicate.title,
+            author=primary.author or duplicate.author,
+            year=primary.year if primary.year is not None else duplicate.year,
+            isbn=primary.isbn or duplicate.isbn,
+            genre=primary.genre or duplicate.genre,
+            pages=primary.pages if primary.pages is not None else duplicate.pages,
+            read=primary.read or duplicate.read,
+            notes=merged_notes,
+            rating=max(
+                [rating for rating in [primary.rating, duplicate.rating] if rating is not None],
+                default=None,
+            ),
+            progress_pages=max(
+                [value for value in [primary.progress_pages, duplicate.progress_pages] if value is not None],
+                default=None,
+            ),
+            language=primary.language or duplicate.language,
+            location=primary.location or duplicate.location,
+            cover=primary.cover or duplicate.cover,
+            read_at=primary.read_at or duplicate.read_at,
+            book_id=primary.book_id,
+            tags=merged_tags,
+            item_type=primary.item_type,
+            composer=primary.composer or duplicate.composer,
+            instrumentation=primary.instrumentation or duplicate.instrumentation,
+            catalog_number=primary.catalog_number or duplicate.catalog_number,
+            key_signature=primary.key_signature or duplicate.key_signature,
+            era_style=primary.era_style or duplicate.era_style,
+            difficulty=primary.difficulty or duplicate.difficulty,
+            duration_minutes=primary.duration_minutes if primary.duration_minutes is not None else duplicate.duration_minutes,
+            publisher=primary.publisher or duplicate.publisher,
+            practice_status=primary.practice_status or duplicate.practice_status,
+            last_practiced=primary.last_practiced or duplicate.last_practiced,
+            series_name=primary.series_name or duplicate.series_name,
+            series_index=primary.series_index if primary.series_index is not None else duplicate.series_index,
+            ai_summary=primary.ai_summary or duplicate.ai_summary,
+            ai_author_note=primary.ai_author_note or duplicate.ai_author_note,
+            ai_tags=merged_ai_tags,
+            tempo_target_bpm=primary.tempo_target_bpm if primary.tempo_target_bpm is not None else duplicate.tempo_target_bpm,
+            practice_minutes_total=(
+                (primary.practice_minutes_total or 0) + (duplicate.practice_minutes_total or 0)
+                if primary.item_type == "SheetMusic"
+                else None
+            ),
+        )
+        if self._has_duplicate_item(updated, exclude=primary):
+            return False
+
+        def mutate():
+            primary_index = self.books.index(primary)
+            self.books[primary_index] = updated
+            self.books = [book for book in self.books if book is not duplicate]
+            self.reading_list = _dedupe(
+                [updated.book_id if item == duplicate.book_id else item for item in self.reading_list]
+            )
+            for session in self.sessions:
+                if session.get("book_id") == duplicate.book_id:
+                    session["book_id"] = updated.book_id
+            return True
+
+        return self._commit(mutate)
+
+    def bulk_edit(
+        self,
+        *,
+        references: list[str] | None = None,
+        filters: dict[str, Any] | None = None,
+        updates: dict[str, Any],
+    ) -> dict[str, int]:
+        updates = dict(updates or {})
+        target_books: list[Book]
+        if references:
+            seen_ids: set[str] = set()
+            resolved: list[Book] = []
+            for reference in references:
+                book = self.get_by_reference(reference)
+                if not book or not book.book_id or book.book_id.casefold() in seen_ids:
+                    continue
+                seen_ids.add(book.book_id.casefold())
+                resolved.append(book)
+            target_books = resolved
+        else:
+            filters = filters or {}
+            target_books = self.filter_books(
+                read=filters.get("read"),
+                location=filters.get("location"),
+                genre=filters.get("genre"),
+                min_rating=filters.get("min_rating"),
+                tags=filters.get("tags"),
+            )
+
+        if not target_books:
+            return {"targets": 0, "updated": 0, "skipped": 0}
+
+        updated_count = 0
+        skipped_count = 0
+
+        def mutate():
+            nonlocal updated_count, skipped_count
+            changed = False
+            for current in target_books:
+                next_genre = str(updates.get("genre", current.genre)).strip()
+                next_language = _normalize_language(updates.get("language", current.language))
+                next_location = _normalize_location(updates.get("location", current.location))
+                next_cover = _normalize_cover(updates.get("cover", current.cover))
+                next_tags = current.tags
+                if "set_tags" in updates:
+                    next_tags = _normalize_tags(updates.get("set_tags"))
+                if updates.get("add_tags") is not None:
+                    next_tags = _normalize_tags([*next_tags, *(_normalize_tags(updates.get("add_tags")))])
+                if updates.get("remove_tags") is not None:
+                    removals = {tag.casefold() for tag in _normalize_tags(updates.get("remove_tags"))}
+                    next_tags = [tag for tag in next_tags if tag.casefold() not in removals]
+                next_series_name = str(updates.get("series_name", current.series_name)).strip()
+                next_series_index = (
+                    current.series_index
+                    if "series_index" not in updates
+                    else _optional_int(updates.get("series_index"))
+                )
+                if next_series_index is not None and next_series_index <= 0:
+                    next_series_index = None
+
+                candidate = Book(
+                    title=current.title,
+                    author=current.author,
+                    year=current.year,
+                    isbn=current.isbn,
+                    genre=next_genre,
+                    pages=current.pages,
+                    read=current.read,
+                    notes=current.notes,
+                    rating=current.rating,
+                    progress_pages=current.progress_pages,
+                    language=next_language,
+                    location=next_location,
+                    cover=next_cover,
+                    read_at=current.read_at,
+                    book_id=current.book_id,
+                    tags=next_tags,
+                    item_type=current.item_type,
+                    composer=current.composer,
+                    instrumentation=current.instrumentation,
+                    catalog_number=current.catalog_number,
+                    key_signature=current.key_signature,
+                    era_style=current.era_style,
+                    difficulty=current.difficulty,
+                    duration_minutes=current.duration_minutes,
+                    publisher=current.publisher,
+                    practice_status=current.practice_status,
+                    last_practiced=current.last_practiced,
+                    series_name=next_series_name,
+                    series_index=next_series_index,
+                    ai_summary=current.ai_summary,
+                    ai_author_note=current.ai_author_note,
+                    ai_tags=current.ai_tags,
+                    tempo_target_bpm=current.tempo_target_bpm,
+                    practice_minutes_total=current.practice_minutes_total,
+                )
+                if self._has_duplicate_item(candidate, exclude=current):
+                    skipped_count += 1
+                    continue
+                if candidate.to_dict() == current.to_dict():
+                    skipped_count += 1
+                    continue
+                idx = self.books.index(current)
+                self.books[idx] = candidate
+                updated_count += 1
+                changed = True
+            return changed
+
+        self._commit(mutate)
+        return {"targets": len(target_books), "updated": updated_count, "skipped": skipped_count}
+
+    def set_series(self, reference: str, series_name: str, series_index: int | None) -> bool:
+        book = self.get_by_reference(reference)
+        if not book:
+            return False
+        name = str(series_name).strip()
+        index = _optional_int(series_index)
+        if index is not None and index <= 0:
+            raise ValueError("Series index must be positive.")
+
+        def mutate():
+            changed = False
+            if book.series_name != name:
+                book.series_name = name
+                changed = True
+            if book.series_index != index:
+                book.series_index = index
+                changed = True
+            return changed
+
+        return self._commit(mutate)
+
+    def next_in_series(self, series_name: str | None = None) -> list[Book]:
+        buckets: dict[str, list[Book]] = {}
+        for book in self.books:
+            if not book.series_name:
+                continue
+            key = book.series_name.casefold()
+            buckets.setdefault(key, []).append(book)
+        if series_name:
+            key = series_name.strip().casefold()
+            selected = buckets.get(key, [])
+            ordered = sorted(
+                selected,
+                key=lambda item: (
+                    item.series_index is None,
+                    item.series_index if item.series_index is not None else 10**9,
+                    item.title.casefold(),
+                ),
+            )
+            return [book for book in ordered if not book.read][:1]
+        result: list[Book] = []
+        for key in sorted(buckets):
+            ordered = sorted(
+                buckets[key],
+                key=lambda item: (
+                    item.series_index is None,
+                    item.series_index if item.series_index is not None else 10**9,
+                    item.title.casefold(),
+                ),
+            )
+            first_unread = next((book for book in ordered if not book.read), None)
+            if first_unread:
+                result.append(first_unread)
+        return result
+
+    def log_practice(
+        self,
+        reference: str,
+        *,
+        minutes: int,
+        bpm: int | None = None,
+        practiced_on: str | None = None,
+        mark_done_status: str | None = None,
+    ) -> bool:
+        book = self.get_by_reference(reference)
+        if not book or book.item_type != "SheetMusic":
+            return False
+        minutes_value = _optional_int(minutes)
+        if minutes_value is None or minutes_value <= 0:
+            raise ValueError("Minutes must be a positive integer.")
+        bpm_value = _optional_int(bpm)
+        if bpm_value is not None and bpm_value <= 0:
+            raise ValueError("BPM must be positive.")
+        practiced_date = _optional_date(practiced_on) if practiced_on else date.today().isoformat()
+        next_status = _normalize_practice_status(mark_done_status) if mark_done_status else ""
+
+        def mutate():
+            changed = False
+            current_minutes = book.practice_minutes_total or 0
+            book.practice_minutes_total = current_minutes + minutes_value
+            book.last_practiced = practiced_date
+            if next_status and book.practice_status != next_status:
+                book.practice_status = next_status
+                changed = True
+            session_id = f"s{len(self.sessions) + 1:06d}"
+            self.sessions.append(
+                {
+                    "id": session_id,
+                    "book_id": book.book_id,
+                    "date": practiced_date,
+                    "minutes": minutes_value,
+                    "kind": "practice",
+                    "done": True,
+                    "bpm": bpm_value,
+                }
+            )
+            return True
+
+        return self._commit(mutate)
+
+    def set_tempo_target(self, reference: str, bpm: int | None) -> bool:
+        book = self.get_by_reference(reference)
+        if not book or book.item_type != "SheetMusic":
+            return False
+        value = _optional_int(bpm)
+        if value is not None and value <= 0:
+            raise ValueError("Tempo target must be positive.")
+
+        def mutate():
+            if book.tempo_target_bpm == value:
+                return False
+            book.tempo_target_bpm = value
+            return True
+
+        return self._commit(mutate)
+
+    def schedule_session(self, reference: str, *, when: str, minutes: int, kind: str = "reading") -> bool:
+        book = self.get_by_reference(reference)
+        if not book:
+            return False
+        day = _optional_date(when)
+        if not day:
+            raise ValueError("Date must be in YYYY-MM-DD format.")
+        minutes_value = _optional_int(minutes)
+        if minutes_value is None or minutes_value <= 0:
+            raise ValueError("Minutes must be a positive integer.")
+        kind_value = str(kind).strip().lower() or "reading"
+
+        def mutate():
+            session_id = f"s{len(self.sessions) + 1:06d}"
+            self.sessions.append(
+                {
+                    "id": session_id,
+                    "book_id": book.book_id,
+                    "date": day,
+                    "minutes": minutes_value,
+                    "kind": kind_value,
+                    "done": False,
+                    "bpm": None,
+                }
+            )
+            return True
+
+        return self._commit(mutate)
+
+    def mark_session_done(self, session_id: str) -> bool:
+        target = str(session_id).strip().casefold()
+        if not target:
+            return False
+
+        def mutate():
+            for session in self.sessions:
+                if str(session.get("id", "")).casefold() != target:
+                    continue
+                if session.get("done"):
+                    return False
+                session["done"] = True
+                return True
+            return False
+
+        return self._commit(mutate)
+
+    def sessions_on(self, day: str) -> list[dict[str, Any]]:
+        key = _optional_date(day)
+        if not key:
+            return []
+        return [session for session in self.sessions if session.get("date") == key]
+
+    def streak(self, *, kind: str = "reading", reference: str | None = None) -> int:
+        kind_key = str(kind).strip().lower()
+        book = self.get_by_reference(reference) if reference else None
+        book_id = book.book_id if book else None
+
+        done_dates: set[date] = set()
+        for session in self.sessions:
+            if not _to_bool(session.get("done", False)):
+                continue
+            if str(session.get("kind", "")).strip().lower() != kind_key:
+                continue
+            if book_id and session.get("book_id") != book_id:
+                continue
+            parsed = _optional_date(session.get("date"))
+            if not parsed:
+                continue
+            done_dates.add(date.fromisoformat(parsed))
+        if not done_dates:
+            return 0
+
+        streak = 0
+        cursor = date.today()
+        while cursor in done_dates:
+            streak += 1
+            cursor -= timedelta(days=1)
+        return streak
+
+    def add_inbox_item(self, text: str) -> bool:
+        content = str(text).strip()
+        if not content:
+            return False
+
+        def mutate():
+            next_id = f"inbox_{len(self.inbox) + 1:04d}"
+            self.inbox.append(
+                {
+                    "id": next_id,
+                    "text": content,
+                    "created_at": date.today().isoformat(),
+                    "status": "open",
+                }
+            )
+            return True
+
+        return self._commit(mutate)
+
+    def list_inbox_items(self, status: str | None = None) -> list[dict[str, Any]]:
+        if not status:
+            return copy.deepcopy(self.inbox)
+        key = str(status).strip().lower()
+        return [copy.deepcopy(item) for item in self.inbox if str(item.get("status", "")).strip().lower() == key]
+
+    def set_inbox_status(self, inbox_id: str, status: str) -> bool:
+        target = str(inbox_id).strip().casefold()
+        next_status = str(status).strip().lower()
+        if not target or not next_status:
+            return False
+
+        def mutate():
+            for item in self.inbox:
+                if str(item.get("id", "")).casefold() != target:
+                    continue
+                if item.get("status") == next_status:
+                    return False
+                item["status"] = next_status
+                return True
+            return False
+
+        return self._commit(mutate)
+
+    def remove_inbox_item(self, inbox_id: str) -> bool:
+        target = str(inbox_id).strip().casefold()
+        if not target:
+            return False
+
+        def mutate():
+            new_items = [item for item in self.inbox if str(item.get("id", "")).casefold() != target]
+            if len(new_items) == len(self.inbox):
+                return False
+            self.inbox = new_items
+            return True
+
+        return self._commit(mutate)
+
+    def doctor_data(self, *, fix: bool = False) -> dict[str, Any]:
+        report = {
+            "items": len(self.books),
+            "invalid_language": 0,
+            "invalid_cover": 0,
+            "invalid_location": 0,
+            "invalid_rating": 0,
+            "negative_progress": 0,
+            "duplicate_tags": 0,
+            "fixed": 0,
+        }
+
+        def inspect(book: Book) -> dict[str, bool]:
+            issues = {
+                "language": book.language not in ALLOWED_LANGUAGES,
+                "cover": book.cover not in ALLOWED_COVERS,
+                "location": book.location not in ALLOWED_LOCATIONS,
+                "rating": book.rating is not None and not (1 <= book.rating <= 5),
+                "progress": book.progress_pages is not None and book.progress_pages < 0,
+                "tags": len(book.tags) != len(_normalize_tags(book.tags)),
+            }
+            return issues
+
+        for book in self.books:
+            issues = inspect(book)
+            report["invalid_language"] += int(issues["language"])
+            report["invalid_cover"] += int(issues["cover"])
+            report["invalid_location"] += int(issues["location"])
+            report["invalid_rating"] += int(issues["rating"])
+            report["negative_progress"] += int(issues["progress"])
+            report["duplicate_tags"] += int(issues["tags"])
+
+        if not fix:
+            return report
+
+        def mutate():
+            fixed = 0
+            for book in self.books:
+                changed = False
+                if book.language not in ALLOWED_LANGUAGES:
+                    book.language = _normalize_language(book.language)
+                    changed = True
+                if book.cover not in ALLOWED_COVERS:
+                    book.cover = _normalize_cover(book.cover)
+                    changed = True
+                if book.location not in ALLOWED_LOCATIONS:
+                    book.location = _normalize_location(book.location)
+                    changed = True
+                if book.rating is not None and not (1 <= book.rating <= 5):
+                    book.rating = None
+                    changed = True
+                if book.progress_pages is not None and book.progress_pages < 0:
+                    book.progress_pages = 0
+                    changed = True
+                deduped_tags = _normalize_tags(book.tags)
+                if deduped_tags != book.tags:
+                    book.tags = deduped_tags
+                    changed = True
+                if changed:
+                    fixed += 1
+            report["fixed"] = fixed
+            return fixed > 0
+
+        self._commit(mutate)
+        return report

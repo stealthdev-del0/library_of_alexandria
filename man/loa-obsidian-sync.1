@@ -1,38 +1,14 @@
-.TH LOA-OBSIDIAN-SYNC 1 "2026-03-23" "Library Of Alexandria" "User Commands"
+.TH LOA-OBSIDIAN-SYNC 1 "2026-03-31" "Library Of Alexandria" "User Commands"
 .SH NAME
-obsidian sync \- Sync managed Alexandria notes into an Obsidian vault
+obsidian sync \- sync managed Alexandria notes into an Obsidian vault
 .SH SYNOPSIS
-alexandria> obsidian sync
-.br
-alexandria> obsidian sync /path/to/your/vault
+alexandria> obsidian sync [vault_path]
 .SH DESCRIPTION
-Syncs managed markdown notes in:
-.br
-\fB<vault>/Alexandria/\fR
-.br
-Notes include unified rich frontmatter, Bases GUI files, Dataview dashboards,
-MOC pages, smart analysis pages, template files, and a sync report.
-.br
-Sync consolidates legacy duplicate Alexandria export roots in the vault
-when they are detected as Alexandria-managed folders.
-.br
-Tags that match genre names are filtered from Obsidian tag output to avoid overlap.
-.br
-Only the Alexandria managed block inside each note is replaced, preserving
-manual text in Connections/Analysis/Notes sections while re-enforcing
-the standard note template structure.
-.br
-If no path is provided, the previously configured vault path is used.
-.br
-If no vault has been configured yet, you can first run:
-.br
-\fBexport obsidian <vault_path>\fR
+sync managed Alexandria notes into an Obsidian vault.
 .SH EXAMPLES
 .TP
 alexandria> obsidian sync
-.TP
-alexandria> obsidian sync ~/Documents/MyVault
 .SH SEE ALSO
-loa(1), loa-export-obsidian(1), loa-obsidian-doctor(1), loa-obsidian-open(1)
+loa(1)
 .SH AUTHOR
 Generated for the Library Of Alexandria project.

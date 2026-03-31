@@ -64,76 +64,62 @@ Optional custom data file:
 LIBRARY_DATA_FILE=/path/to/your/library.json python3 main.py
 ```
 
-## Core Commands
+## Commands (Updated)
 
-- `add` - add a new item (`Book` or `SheetMusic`)
-- `edit` - edit an existing item by ID/ISBN/title/author/composer
-- `details` - detailed single-item view (ID/ISBN/title/author/composer)
-- `list` - list items with essential columns (clean default view)
-- `list full` - list all columns
-- `list read` - list read items
-- `list unread` - list unread items
-- `list sheet` - list sheet music only
-- `list genre <name>` - list items by genre
-- `list language <name>` - list items by language
-- `list instrument <name>` - list sheet music by instrumentation
-- `list tag <name>` - list items by tag
-- `sort by <title|author|type|year|pages|language>` - sorted listing
-- `find title` - search by title
-- `find author` - search by author
-- `find composer` - search sheet music by composer
-- `authors` - list all authors with book count and top genres/tags
-- `find notes` - full-text search in notes
-- `check` - show one item by ID/ISBN/title/author/composer
-- `remove` - remove by ID/ISBN/title/author
-- `mark read` - mark as read (ID/ISBN/title/author)
-- `mark unread` - mark as unread (ID/ISBN/title/author)
-- `notes` - update notes (ID/ISBN/title/author)
-- `tag add` - add tags to an item
-- `tag remove` - remove tags from an item
-- `tag set` - replace all tags on an item
-- `tag clear` - clear all tags on an item
-- `reading add` - add to reading list by ID/ISBN/title/author
-- `reading list` - show reading list
-- `reading remove` - remove from reading list by ID/ISBN/title/author
-- `reading smart preview [count]` - preview recommended books from your interests
-- `reading smart generate [count]` - replace reading list with recommendations
-- `reading smart append [count]` - append recommendations to current reading list
-- `interests set` - configure recommendation interests (genres/tags/authors/rating/location)
-- `interests show` - show active recommendation interests
-- `interests clear` - reset recommendation interests
+Catalog and search:
 
-## New Feature Commands
+- `add`, `edit`, `details`, `remove`, `check`
+- `list`, `list full`, `list read`, `list unread`, `list sheet`
+- `list genre <name>`, `list language <name>`, `list instrument <name>`, `list tag <name>`
+- `sort by <field>`, `find title`, `find author`, `find composer`, `find notes`
+- `search <query>` (advanced filters like `lang:german rating>=4 unread`)
+- `metadata autofill [reference|all]`
+- `dedup scan`, `dedup merge`
+- `doctor [fix]`
+- `authors`
 
-- `rate` - set or clear rating (1-5) by ID/ISBN/title/author
-- `progress` - set reading progress (current page) by ID/ISBN/title/author
-- `language` - set language to `German`, `English`, `French`, or `Japanese` by ID/ISBN/title/author
-- `location` - set location to `Pforta` or `Zuhause` by ID/ISBN/title/author
-- `practice` - set sheet music practice status (`Unstarted`, `Learning`, `Rehearsing`, `Performance-ready`, `Mastered`)
-- `goal show` - show monthly/yearly goals and progress
-- `goal set monthly` - set monthly reading goal
-- `goal set yearly` - set yearly reading goal
-- `goal clear monthly` - clear monthly goal
-- `goal clear yearly` - clear yearly goal
-- `stats` - show totals (books + sheet music), read stats, top genres/tags, and location split
-- `sheet stats` - show sheet-music-specific stats (composers, instrumentation, difficulty, practice status)
-- `backup` - create backup JSON
-- `restore` - restore from latest backup or a specific JSON file
-- `export` - export as JSON or CSV
-- `export obsidian <vault_path>` - generate and sync managed Obsidian notes under `<vault_path>/Alexandria`
-- `obsidian` - show configured Obsidian vault path and command usage
-- `obsidian sync [vault_path]` - sync managed notes with block-safe updates (manual analysis/notes are preserved)
-- `obsidian doctor [vault_path]` - validate vault path, write permissions, and expected folders
-- `obsidian open [book-id|vault_path]` - open the vault or jump directly to one managed note (`obsidian open b0001`)
-- `import` - import from JSON or CSV
-- `man` - show bundled manpage for one exact command (`man add`, `man reading add`)
-- `compact` - toggle compact table mode (`on/off/toggle/status`)
-- `theme` - switch theme, preview colors, set role overrides, and toggle color mode
-- `undo` - undo the last change in the current app session
-- `smart add` - create/update a saved smart filter list
-- `smart list` - show all saved smart lists
-- `smart run` - run a smart list and display matching books
-- `smart remove` - delete a smart list
+Reading and progress:
+
+- `mark read`, `mark unread`, `rate`, `progress`, `notes`
+- `language`, `location`
+- `tag add`, `tag remove`, `tag set`, `tag clear`
+- `reading add`, `reading list`, `reading remove`
+- `reading plan [weeks]`
+- `reading smart preview [count]`, `reading smart generate [count]`, `reading smart append [count]`
+- `interests set`, `interests show`, `interests clear`
+- `goal show`, `goal set monthly`, `goal set yearly`, `goal clear monthly`, `goal clear yearly`
+- `smart add`, `smart list`, `smart run`, `smart remove`
+
+Sheet music:
+
+- `practice`
+- `practice log`
+- `practice tempo`
+- `series set`
+- `series next [name]`
+- `sheet stats`
+
+Planning and workflow:
+
+- `calendar add`, `calendar list [date]`, `calendar done`, `calendar streak [reading|practice]`
+- `inbox add`, `inbox list`, `inbox process`, `inbox done`, `inbox remove`
+- `snapshot create [name]`, `snapshot list`, `snapshot restore`
+- `bulk edit`
+
+AI and profiles:
+
+- `profile show`, `profile list`, `profile new <name>`, `profile use <name>`
+- `ai status`, `ai mode [safe|fast]`, `ai model <name>`, `ai recommend [count]`, `ai enrich [reference|all]`
+
+Data, export, and Obsidian:
+
+- `backup`, `restore`, `export`, `import`
+- `export obsidian <vault_path>`
+- `obsidian`, `obsidian sync [vault_path]`, `obsidian doctor [vault_path]`, `obsidian open [book-id|vault_path]`
+
+UX and docs:
+
+- `help [command]`, `man <command>`, `theme`, `compact`, `undo`, `history`, `quit`
 
 ## Smart Reading List
 

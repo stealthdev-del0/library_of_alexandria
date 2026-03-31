@@ -1,4 +1,4 @@
-.TH LOA 1 "2026-03-15" "Library Of Alexandria" "User Commands"
+.TH LOA 1 "2026-03-31" "Library Of Alexandria" "User Commands"
 .SH NAME
 loa \- command index for Library Of Alexandria
 .SH SYNOPSIS
@@ -10,209 +10,305 @@ This page lists all available commands and where to find their dedicated man pag
 .SH COMMAND MANUALS
 .TP
 \fBadd\fR
-Interactively add a new item (book or sheet music) to your library (see \fBloa-add.1\fR)
+add a new item (book or sheet music) (see \fBloa-add.1\fR)
 .TP
 \fBedit\fR
-Edit fields of an item selected by reference (see \fBloa-edit.1\fR)
+edit an item by reference (see \fBloa-edit.1\fR)
 .TP
 \fBdetails\fR
-Show one item in a structured detail view (see \fBloa-details.1\fR)
+show detailed view for one item (see \fBloa-details.1\fR)
+.TP
+\fBbulk edit\fR
+bulk\-update language/location/genre/tags/series on filtered items (see \fBloa-bulk-edit.1\fR)
 .TP
 \fBlist\fR
-Show all items (see \fBloa-list.1\fR)
+list items with essential columns (see \fBloa-list.1\fR)
 .TP
 \fBlist full\fR
-Show full table with all item columns (see \fBloa-list-full.1\fR)
+list all columns for every item (see \fBloa-list-full.1\fR)
 .TP
 \fBlist read\fR
-Show only read items (see \fBloa-list-read.1\fR)
+list only read items (see \fBloa-list-read.1\fR)
 .TP
 \fBlist unread\fR
-Show only unread items (see \fBloa-list-unread.1\fR)
+list only unread items (see \fBloa-list-unread.1\fR)
 .TP
 \fBlist sheet\fR
-Show only sheet music items (see \fBloa-list-sheet.1\fR)
+list only sheet music items (see \fBloa-list-sheet.1\fR)
 .TP
 \fBlist genre <name>\fR
-Show items by exact genre name (see \fBloa-list-genre.1\fR)
+list items in a specific genre (see \fBloa-list-genre.1\fR)
 .TP
 \fBlist language <name>\fR
-Show items by exact language value (see \fBloa-list-language.1\fR)
+list items in a specific language (see \fBloa-list-language.1\fR)
 .TP
 \fBlist instrument <name>\fR
-Show sheet music by instrumentation (see \fBloa-list-instrument.1\fR)
+list sheet music by instrumentation (see \fBloa-list-instrument.1\fR)
 .TP
 \fBlist tag <name>\fR
-Show items by tag (see \fBloa-list-tag.1\fR)
+list items by tag (see \fBloa-list-tag.1\fR)
 .TP
 \fBsort by <field>\fR
-Sort items by a supported field (see \fBloa-sort-by.1\fR)
+sort by title | author | type | year | pages | language (see \fBloa-sort-by.1\fR)
 .TP
 \fBfind title\fR
-Search items by title substring (see \fBloa-find-title.1\fR)
+search items by title (see \fBloa-find-title.1\fR)
 .TP
 \fBfind author\fR
-Search items by author substring (see \fBloa-find-author.1\fR)
+search items by author (see \fBloa-find-author.1\fR)
 .TP
 \fBfind composer\fR
-Search sheet music by composer substring (see \fBloa-find-composer.1\fR)
+search sheet music by composer (see \fBloa-find-composer.1\fR)
 .TP
 \fBauthors\fR
-Show all authors with counts and top genres/tags (see \fBloa-authors.1\fR)
+list authors with counts and top genres/tags (see \fBloa-authors.1\fR)
 .TP
 \fBfind notes\fR
-Search full-text notes (see \fBloa-find-notes.1\fR)
+search full\-text notes (see \fBloa-find-notes.1\fR)
+.TP
+\fBsearch <query>\fR
+advanced search (e.g. marx lang:german rating>=4 unread) (see \fBloa-search.1\fR)
+.TP
+\fBmetadata autofill [reference|all]\fR
+fetch missing metadata from online sources with confirmation (see \fBloa-metadata-autofill.1\fR)
+.TP
+\fBdedup scan\fR
+scan for likely duplicate items (see \fBloa-dedup-scan.1\fR)
+.TP
+\fBdedup merge\fR
+merge two duplicate items (see \fBloa-dedup-merge.1\fR)
+.TP
+\fBdoctor [fix]\fR
+validate data integrity and optionally auto\-fix common issues (see \fBloa-doctor.1\fR)
 .TP
 \fBcheck\fR
-Show one item by reference (see \fBloa-check.1\fR)
+show one item by reference (see \fBloa-check.1\fR)
 .TP
 \fBremove\fR
-Delete an item by reference (see \fBloa-remove.1\fR)
+remove an item by reference (see \fBloa-remove.1\fR)
 .TP
 \fBmark read\fR
-Mark an item as read (see \fBloa-mark-read.1\fR)
+mark an item as read by reference (see \fBloa-mark-read.1\fR)
 .TP
 \fBmark unread\fR
-Mark an item as unread (see \fBloa-mark-unread.1\fR)
+mark an item as unread by reference (see \fBloa-mark-unread.1\fR)
 .TP
 \fBnotes\fR
-Update notes for an item (see \fBloa-notes.1\fR)
+add or update notes by reference (see \fBloa-notes.1\fR)
 .TP
 \fBtag add\fR
-Add tags to an item (see \fBloa-tag-add.1\fR)
+add tags to an item (see \fBloa-tag-add.1\fR)
 .TP
 \fBtag remove\fR
-Remove tags from an item (see \fBloa-tag-remove.1\fR)
+remove tags from an item (see \fBloa-tag-remove.1\fR)
 .TP
 \fBtag set\fR
-Replace all tags on an item (see \fBloa-tag-set.1\fR)
+replace all tags on an item (see \fBloa-tag-set.1\fR)
 .TP
 \fBtag clear\fR
-Clear all tags on an item (see \fBloa-tag-clear.1\fR)
+clear all tags from an item (see \fBloa-tag-clear.1\fR)
 .TP
 \fBrate\fR
-Set or clear rating (1-5) (see \fBloa-rate.1\fR)
+set rating 1\-5 by reference (see \fBloa-rate.1\fR)
 .TP
 \fBprogress\fR
-Set current page progress (see \fBloa-progress.1\fR)
+set reading progress (pages) by reference (see \fBloa-progress.1\fR)
 .TP
 \fBlanguage\fR
-Set language of an item (see \fBloa-language.1\fR)
+set language to German/English/French/Japanese by reference (see \fBloa-language.1\fR)
 .TP
 \fBlocation\fR
-Set physical location of an item (see \fBloa-location.1\fR)
+set location to Pforta or Zuhause by reference (see \fBloa-location.1\fR)
 .TP
 \fBpractice\fR
-Set practice status for a sheet music entry (see \fBloa-practice.1\fR)
+set sheet music practice status by reference (see \fBloa-practice.1\fR)
+.TP
+\fBpractice log\fR
+log sheet\-music practice minutes and bpm (see \fBloa-practice-log.1\fR)
+.TP
+\fBpractice tempo\fR
+set tempo target bpm for sheet music (see \fBloa-practice-tempo.1\fR)
+.TP
+\fBseries set\fR
+set series name/index for one item (see \fBloa-series-set.1\fR)
+.TP
+\fBseries next [name]\fR
+show next unread item per series or for one series (see \fBloa-series-next.1\fR)
 .TP
 \fBreading add\fR
-Add an item to reading list (see \fBloa-reading-add.1\fR)
+add an item to reading list by reference (see \fBloa-reading-add.1\fR)
 .TP
 \fBreading list\fR
-Show reading list books (see \fBloa-reading-list.1\fR)
+show reading list (see \fBloa-reading-list.1\fR)
 .TP
 \fBreading remove\fR
-Remove an item from reading list (see \fBloa-reading-remove.1\fR)
+remove from reading list by reference (see \fBloa-reading-remove.1\fR)
+.TP
+\fBreading plan [weeks]\fR
+build a weekly reading plan from capacity and progress (see \fBloa-reading-plan.1\fR)
 .TP
 \fBreading smart preview [count]\fR
-Preview recommendations based on interests (see \fBloa-reading-smart-preview.1\fR)
+preview smart recommendations based on interests (see \fBloa-reading-smart-preview.1\fR)
 .TP
 \fBreading smart generate [count]\fR
-Replace reading list with recommendations (see \fBloa-reading-smart-generate.1\fR)
+replace reading list with smart recommendations (see \fBloa-reading-smart-generate.1\fR)
 .TP
 \fBreading smart append [count]\fR
-Append recommendations to reading list (see \fBloa-reading-smart-append.1\fR)
+append smart recommendations to reading list (see \fBloa-reading-smart-append.1\fR)
 .TP
 \fBinterests set\fR
-Configure smart recommendation interests (see \fBloa-interests-set.1\fR)
+set smart recommendation interests (see \fBloa-interests-set.1\fR)
 .TP
 \fBinterests show\fR
-Show smart recommendation interests (see \fBloa-interests-show.1\fR)
+show current smart recommendation interests (see \fBloa-interests-show.1\fR)
 .TP
 \fBinterests clear\fR
-Reset smart recommendation interests (see \fBloa-interests-clear.1\fR)
+clear smart recommendation interests (see \fBloa-interests-clear.1\fR)
 .TP
 \fBsmart add\fR
-Create or update a smart list (see \fBloa-smart-add.1\fR)
+create or update a smart list (see \fBloa-smart-add.1\fR)
 .TP
 \fBsmart list\fR
-List saved smart lists (see \fBloa-smart-list.1\fR)
+list all smart lists (see \fBloa-smart-list.1\fR)
 .TP
 \fBsmart run\fR
-Run a smart list (see \fBloa-smart-run.1\fR)
+run a smart list (see \fBloa-smart-run.1\fR)
 .TP
 \fBsmart remove\fR
-Delete a smart list (see \fBloa-smart-remove.1\fR)
+remove a smart list (see \fBloa-smart-remove.1\fR)
 .TP
 \fBgoal show\fR
-Display reading goals and progress (see \fBloa-goal-show.1\fR)
+show monthly and yearly goals (see \fBloa-goal-show.1\fR)
 .TP
 \fBgoal set monthly\fR
-Set monthly reading target (see \fBloa-goal-set-monthly.1\fR)
+set monthly reading goal (see \fBloa-goal-set-monthly.1\fR)
 .TP
 \fBgoal set yearly\fR
-Set yearly reading target (see \fBloa-goal-set-yearly.1\fR)
+set yearly reading goal (see \fBloa-goal-set-yearly.1\fR)
 .TP
 \fBgoal clear monthly\fR
-Clear monthly reading goal (see \fBloa-goal-clear-monthly.1\fR)
+clear monthly goal (see \fBloa-goal-clear-monthly.1\fR)
 .TP
 \fBgoal clear yearly\fR
-Clear yearly reading goal (see \fBloa-goal-clear-yearly.1\fR)
+clear yearly goal (see \fBloa-goal-clear-yearly.1\fR)
+.TP
+\fBcalendar add\fR
+schedule reading/practice session (see \fBloa-calendar-add.1\fR)
+.TP
+\fBcalendar list [date]\fR
+list scheduled sessions for one date (see \fBloa-calendar-list.1\fR)
+.TP
+\fBcalendar done\fR
+mark one scheduled session as done (see \fBloa-calendar-done.1\fR)
+.TP
+\fBcalendar streak [reading|practice]\fR
+show current completion streak (see \fBloa-calendar-streak.1\fR)
+.TP
+\fBinbox add\fR
+quick\-capture unstructured item idea (see \fBloa-inbox-add.1\fR)
+.TP
+\fBinbox list\fR
+list inbox items (see \fBloa-inbox-list.1\fR)
+.TP
+\fBinbox process\fR
+convert inbox item into full library entry (see \fBloa-inbox-process.1\fR)
+.TP
+\fBinbox done\fR
+mark inbox item as done (see \fBloa-inbox-done.1\fR)
+.TP
+\fBinbox remove\fR
+remove inbox item (see \fBloa-inbox-remove.1\fR)
+.TP
+\fBsnapshot create [name]\fR
+create named restore snapshot (see \fBloa-snapshot-create.1\fR)
+.TP
+\fBsnapshot list\fR
+list available snapshots (see \fBloa-snapshot-list.1\fR)
+.TP
+\fBsnapshot restore\fR
+restore state from snapshot (see \fBloa-snapshot-restore.1\fR)
+.TP
+\fBprofile show\fR
+show active data profile (see \fBloa-profile-show.1\fR)
+.TP
+\fBprofile list\fR
+list available profiles (see \fBloa-profile-list.1\fR)
+.TP
+\fBprofile new <name>\fR
+create a new profile and switch to it (see \fBloa-profile-new.1\fR)
+.TP
+\fBprofile use <name>\fR
+switch active profile (see \fBloa-profile-use.1\fR)
+.TP
+\fBai status\fR
+show AI/Ollama integration status (see \fBloa-ai-status.1\fR)
+.TP
+\fBai mode [safe|fast]\fR
+set AI safety mode (preview+approve or fast apply) (see \fBloa-ai-mode.1\fR)
+.TP
+\fBai model <name>\fR
+set default Ollama model (see \fBloa-ai-model.1\fR)
+.TP
+\fBai recommend [count]\fR
+show smart recommendations with explicit reasons (see \fBloa-ai-recommend.1\fR)
+.TP
+\fBai enrich [reference|all]\fR
+generate summary/description/tags with preview+approve (see \fBloa-ai-enrich.1\fR)
 .TP
 \fBstats\fR
-Show aggregate library statistics (see \fBloa-stats.1\fR)
+show collection and reading stats (see \fBloa-stats.1\fR)
 .TP
 \fBsheet stats\fR
-Show sheet-music-specific statistics (see \fBloa-sheet-stats.1\fR)
+show sheet music specific statistics (see \fBloa-sheet-stats.1\fR)
 .TP
 \fBbackup\fR
-Create timestamped JSON backup (see \fBloa-backup.1\fR)
+create backup file (see \fBloa-backup.1\fR)
 .TP
 \fBrestore\fR
-Restore library from JSON backup/export (see \fBloa-restore.1\fR)
+restore from backup/export JSON (see \fBloa-restore.1\fR)
 .TP
 \fBexport\fR
-Export data as JSON or CSV (see \fBloa-export.1\fR)
+export as JSON or CSV (see \fBloa-export.1\fR)
 .TP
-\fBexport obsidian\fR
-Export markdown notes for an Obsidian vault (see \fBloa-export-obsidian.1\fR)
+\fBexport obsidian <vault_path>\fR
+export collection as Obsidian markdown vault notes (see \fBloa-export-obsidian.1\fR)
 .TP
 \fBobsidian\fR
-Show configured Obsidian vault and usage hints (see \fBloa-obsidian.1\fR)
+show obsidian integration status and usage (see \fBloa-obsidian.1\fR)
 .TP
-\fBobsidian sync\fR
-Sync managed Alexandria notes into an Obsidian vault (see \fBloa-obsidian-sync.1\fR)
+\fBobsidian sync [vault_path]\fR
+sync managed Alexandria notes into an Obsidian vault (see \fBloa-obsidian-sync.1\fR)
 .TP
-\fBobsidian doctor\fR
-Validate Obsidian vault path, write access, and required folders (see \fBloa-obsidian-doctor.1\fR)
+\fBobsidian doctor [vault_path]\fR
+validate Obsidian vault path, write access, and folders (see \fBloa-obsidian-doctor.1\fR)
 .TP
-\fBobsidian open\fR
-Open Obsidian vault or a specific managed note without exiting the CLI (see \fBloa-obsidian-open.1\fR)
+\fBobsidian open [book\-id|vault_path]\fR
+open vault or jump directly to one managed note (see \fBloa-obsidian-open.1\fR)
 .TP
 \fBimport\fR
-Import items from JSON or CSV (see \fBloa-import.1\fR)
+import from JSON or CSV (see \fBloa-import.1\fR)
 .TP
-\fBman\fR
-Show bundled command manual pages from inside the app (see \fBloa-man.1\fR)
+\fBman <command>\fR
+show bundled man page for a specific command (see \fBloa-man.1\fR)
 .TP
-\fBcompact\fR
-Toggle compact table mode (see \fBloa-compact.1\fR)
+\fBcompact [on|off|toggle]\fR
+toggle compact table mode (see \fBloa-compact.1\fR)
 .TP
-\fBtheme\fR
-Show, switch, and personalize colors (see \fBloa-theme.1\fR)
+\fBtheme [name|list|preview|set|clear|color]\fR
+set theme, preview, and personalize colors (see \fBloa-theme.1\fR)
 .TP
 \fBundo\fR
-Revert the latest change (see \fBloa-undo.1\fR)
+undo last change (see \fBloa-undo.1\fR)
 .TP
 \fBhistory\fR
-Show typed command history (see \fBloa-history.1\fR)
+show command history (see \fBloa-history.1\fR)
 .TP
-\fBhelp\fR
-Show built-in command list (see \fBloa-help.1\fR)
+\fBhelp [command]\fR
+print help or command\-specific help (see \fBloa-help.1\fR)
 .TP
 \fBquit\fR
-Exit the application (see \fBloa-quit.1\fR)
+exit program (see \fBloa-quit.1\fR)
 .SH SEE ALSO
-loa-add(1), loa-edit(1), loa-details(1), loa-list(1), loa-list-full(1), loa-list-read(1), loa-list-unread(1), loa-list-sheet(1), loa-list-genre(1), loa-list-language(1), loa-list-instrument(1), loa-list-tag(1), loa-sort-by(1), loa-find-title(1), loa-find-author(1), loa-find-composer(1), loa-authors(1), loa-find-notes(1), loa-check(1), loa-remove(1), loa-mark-read(1), loa-mark-unread(1), loa-notes(1), loa-tag-add(1), loa-tag-remove(1), loa-tag-set(1), loa-tag-clear(1), loa-rate(1), loa-progress(1), loa-language(1), loa-location(1), loa-practice(1), loa-reading-add(1), loa-reading-list(1), loa-reading-remove(1), loa-reading-smart-preview(1), loa-reading-smart-generate(1), loa-reading-smart-append(1), loa-interests-set(1), loa-interests-show(1), loa-interests-clear(1), loa-smart-add(1), loa-smart-list(1), loa-smart-run(1), loa-smart-remove(1), loa-goal-show(1), loa-goal-set-monthly(1), loa-goal-set-yearly(1), loa-goal-clear-monthly(1), loa-goal-clear-yearly(1), loa-stats(1), loa-sheet-stats(1), loa-backup(1), loa-restore(1), loa-export(1), loa-export-obsidian(1), loa-obsidian(1), loa-obsidian-sync(1), loa-obsidian-doctor(1), loa-obsidian-open(1), loa-import(1), loa-man(1), loa-compact(1), loa-theme(1), loa-undo(1), loa-history(1), loa-help(1), loa-quit(1)
+loa-add(1), loa-edit(1), loa-details(1), loa-bulk-edit(1), loa-list(1), loa-list-full(1), loa-list-read(1), loa-list-unread(1), loa-list-sheet(1), loa-list-genre(1), loa-list-language(1), loa-list-instrument(1), loa-list-tag(1), loa-sort-by(1), loa-find-title(1), loa-find-author(1), loa-find-composer(1), loa-authors(1), loa-find-notes(1), loa-search(1), loa-metadata-autofill(1), loa-dedup-scan(1), loa-dedup-merge(1), loa-doctor(1), loa-check(1), loa-remove(1), loa-mark-read(1), loa-mark-unread(1), loa-notes(1), loa-tag-add(1), loa-tag-remove(1), loa-tag-set(1), loa-tag-clear(1), loa-rate(1), loa-progress(1), loa-language(1), loa-location(1), loa-practice(1), loa-practice-log(1), loa-practice-tempo(1), loa-series-set(1), loa-series-next(1), loa-reading-add(1), loa-reading-list(1), loa-reading-remove(1), loa-reading-plan(1), loa-reading-smart-preview(1), loa-reading-smart-generate(1), loa-reading-smart-append(1), loa-interests-set(1), loa-interests-show(1), loa-interests-clear(1), loa-smart-add(1), loa-smart-list(1), loa-smart-run(1), loa-smart-remove(1), loa-goal-show(1), loa-goal-set-monthly(1), loa-goal-set-yearly(1), loa-goal-clear-monthly(1), loa-goal-clear-yearly(1), loa-calendar-add(1), loa-calendar-list(1), loa-calendar-done(1), loa-calendar-streak(1), loa-inbox-add(1), loa-inbox-list(1), loa-inbox-process(1), loa-inbox-done(1), loa-inbox-remove(1), loa-snapshot-create(1), loa-snapshot-list(1), loa-snapshot-restore(1), loa-profile-show(1), loa-profile-list(1), loa-profile-new(1), loa-profile-use(1), loa-ai-status(1), loa-ai-mode(1), loa-ai-model(1), loa-ai-recommend(1), loa-ai-enrich(1), loa-stats(1), loa-sheet-stats(1), loa-backup(1), loa-restore(1), loa-export(1), loa-export-obsidian(1), loa-obsidian(1), loa-obsidian-sync(1), loa-obsidian-doctor(1), loa-obsidian-open(1), loa-import(1), loa-man(1), loa-compact(1), loa-theme(1), loa-undo(1), loa-history(1), loa-help(1), loa-quit(1)
 .SH AUTHOR
 Generated for the Library Of Alexandria project.

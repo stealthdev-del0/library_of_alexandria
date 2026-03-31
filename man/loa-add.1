@@ -1,32 +1,13 @@
-.TH LOA-ADD 1 "2026-03-15" "Library Of Alexandria" "User Commands"
+.TH LOA-ADD 1 "2026-03-31" "Library Of Alexandria" "User Commands"
 .SH NAME
-add \- Interactively add a new item (book or sheet music)
+add \- add a new item (book or sheet music)
 .SH SYNOPSIS
 alexandria> add
 .SH DESCRIPTION
-.TP
-Starts a guided prompt for title and type (\fBBook\fR or \fBSheetMusic\fR), then asks matching metadata.
-.TP
-For sheet music, additional prompts include composer, instrumentation, catalog/work number, key, era/style, difficulty, duration, publisher, and practice status.
-.TP
-Language is stored as one of: German, English, French, Japanese.
-.TP
-Type cancel at any prompt to abort.
-.TP
-Item data is saved immediately after a successful add.
-.TP
-Duplicate ISBN entries are rejected.
-.TP
-Duplicate signatures are rejected:
-.br
-Book -> title+author+language+cover
-.br
-SheetMusic -> title+composer+instrumentation+catalog/work number+publisher
+add a new item (book or sheet music).
 .SH EXAMPLES
 .TP
 alexandria> add
-.TP
-alexandria> (follow prompts and finish with notes)
 .SH SEE ALSO
 loa(1)
 .SH AUTHOR

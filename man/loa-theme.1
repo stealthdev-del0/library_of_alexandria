@@ -1,52 +1,13 @@
-.TH LOA-THEME 1 "2026-03-15" "Library Of Alexandria" "User Commands"
+.TH LOA-THEME 1 "2026-03-31" "Library Of Alexandria" "User Commands"
 .SH NAME
-theme \- Show, switch, and personalize CLI colors
+theme \- set theme, preview, and personalize colors
 .SH SYNOPSIS
-alexandria> theme
-.br
-alexandria> theme list
-.br
-alexandria> theme preview
-.br
-alexandria> theme classic
-.br
-alexandria> theme set accent bright_cyan
-.br
-alexandria> theme set accent #35c2ff
-.br
-alexandria> theme clear [accent|success|warning|error]
-.br
-alexandria> theme color on|off|toggle|status
+alexandria> theme [name|list|preview|set|clear|color]
 .SH DESCRIPTION
-.TP
-Shows the active theme when called without arguments.
-.TP
-Lists available themes with \fBtheme list\fR, including a swatch preview per role.
-.TP
-Applies a named theme for the current session.
-.TP
-\fBtheme preview\fR prints a live visual preview of info/success/warning/error styles.
-.TP
-\fBtheme set <role> <color>\fR overrides one role color.
-.TP
-Color can be a built-in name (for example \fBbright_cyan\fR) or a hex value (\fB#RRGGBB\fR).
-.TP
-\fBtheme clear\fR removes all overrides, or only one role when given.
-.TP
-\fBtheme color ...\fR toggles ANSI color output in the current session.
-.TP
-The renderer applies an ANSI reset before styled output so shell-inherited colors do not override theme colors.
+set theme, preview, and personalize colors.
 .SH EXAMPLES
 .TP
-alexandria> theme list
-.TP
-alexandria> theme ocean
-.TP
-alexandria> theme set warning bright_yellow
-.TP
 alexandria> theme set accent #35c2ff
-.TP
-alexandria> theme color off
 .SH SEE ALSO
 loa(1)
 .SH AUTHOR

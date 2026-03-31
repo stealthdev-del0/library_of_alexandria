@@ -1,41 +1,14 @@
-.TH LOA-EXPORT-OBSIDIAN 1 "2026-03-23" "Library Of Alexandria" "User Commands"
+.TH LOA-EXPORT-OBSIDIAN 1 "2026-03-31" "Library Of Alexandria" "User Commands"
 .SH NAME
-export obsidian \- Export library notes for an Obsidian vault
+export obsidian \- export collection as Obsidian markdown vault notes
 .SH SYNOPSIS
-alexandria> export obsidian /path/to/your/vault
+alexandria> export obsidian <vault_path>
 .SH DESCRIPTION
-Exports your collection as markdown notes into:
-.br
-\fB<vault>/Alexandria/\fR
-.br
-Each managed note contains a protected generated block:
-.br
-\fB<!-- ALEXANDRIA:START --> ... <!-- ALEXANDRIA:END -->\fR
-.br
-During later syncs, only that block is replaced, so your own Analysis/Notes text stays intact.
-.br
-Generated notes use enforced sections: Metadata, Connections, Analysis, Notes.
-.br
-The export writes a Bases-first GUI (\fBAlexandria/Bases/*.base\fR), Dataview dashboards,
-MOC pages (including Genres), saved searches, bookmarks page, smart analysis pages,
-template files, a sync report, and a CSS snippet at \fB.obsidian/snippets/alexandria.css\fR.
-.br
-Obsidian settings are also updated for GUI usage:
-\fB.obsidian/templates.json\fR, \fB.obsidian/bookmarks.json\fR, \fB.obsidian/workspace.json\fR,
-and graph defaults for exploration.
-.br
-If legacy duplicate Alexandria roots are detected in the vault, sync/export
-consolidates them to the canonical \fBAlexandria/\fR root.
-.br
-Tags matching genre names are excluded from Obsidian tag output to prevent overlap.
-.br
-The vault path is stored and reused by \fBobsidian sync\fR and \fBobsidian open\fR.
+export collection as Obsidian markdown vault notes.
 .SH EXAMPLES
 .TP
 alexandria> export obsidian ~/Documents/MyVault
-.TP
-alexandria> export obsidian /Users/me/Obsidian/MainVault
 .SH SEE ALSO
-loa(1), loa-export(1), loa-obsidian(1), loa-obsidian-sync(1), loa-obsidian-doctor(1), loa-obsidian-open(1)
+loa(1)
 .SH AUTHOR
 Generated for the Library Of Alexandria project.

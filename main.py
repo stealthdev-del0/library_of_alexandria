@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import readline
+import shlex
 import shutil
 import subprocess
 import sys
@@ -13,9 +14,12 @@ import threading
 import time
 import webbrowser
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import quote
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
 
 from system import (
     ALLOWED_COVERS,
@@ -75,6 +79,7 @@ COMMAND_HELP = [
     ("add", "add a new item (book or sheet music)"),
     ("edit", "edit an item by reference"),
     ("details", "show detailed view for one item"),
+    ("bulk edit", "bulk-update language/location/genre/tags/series on filtered items"),
     ("list", "list items with essential columns"),
     ("list full", "list all columns for every item"),
     ("list read", "list only read items"),
@@ -90,6 +95,11 @@ COMMAND_HELP = [
     ("find composer", "search sheet music by composer"),
     ("authors", "list authors with counts and top genres/tags"),
     ("find notes", "search full-text notes"),
+    ("search <query>", "advanced search (e.g. marx lang:german rating>=4 unread)"),
+    ("metadata autofill [reference|all]", "fetch missing metadata from online sources with confirmation"),
+    ("dedup scan", "scan for likely duplicate items"),
+    ("dedup merge", "merge two duplicate items"),
+    ("doctor [fix]", "validate data integrity and optionally auto-fix common issues"),
     ("check", "show one item by reference"),
     ("remove", "remove an item by reference"),
     ("mark read", "mark an item as read by reference"),
@@ -104,9 +114,14 @@ COMMAND_HELP = [
     ("language", "set language to German/English/French/Japanese by reference"),
     ("location", "set location to Pforta or Zuhause by reference"),
     ("practice", "set sheet music practice status by reference"),
+    ("practice log", "log sheet-music practice minutes and bpm"),
+    ("practice tempo", "set tempo target bpm for sheet music"),
+    ("series set", "set series name/index for one item"),
+    ("series next [name]", "show next unread item per series or for one series"),
     ("reading add", "add an item to reading list by reference"),
     ("reading list", "show reading list"),
     ("reading remove", "remove from reading list by reference"),
+    ("reading plan [weeks]", "build a weekly reading plan from capacity and progress"),
     ("reading smart preview [count]", "preview smart recommendations based on interests"),
     ("reading smart generate [count]", "replace reading list with smart recommendations"),
     ("reading smart append [count]", "append smart recommendations to reading list"),
@@ -122,6 +137,27 @@ COMMAND_HELP = [
     ("goal set yearly", "set yearly reading goal"),
     ("goal clear monthly", "clear monthly goal"),
     ("goal clear yearly", "clear yearly goal"),
+    ("calendar add", "schedule reading/practice session"),
+    ("calendar list [date]", "list scheduled sessions for one date"),
+    ("calendar done", "mark one scheduled session as done"),
+    ("calendar streak [reading|practice]", "show current completion streak"),
+    ("inbox add", "quick-capture unstructured item idea"),
+    ("inbox list", "list inbox items"),
+    ("inbox process", "convert inbox item into full library entry"),
+    ("inbox done", "mark inbox item as done"),
+    ("inbox remove", "remove inbox item"),
+    ("snapshot create [name]", "create named restore snapshot"),
+    ("snapshot list", "list available snapshots"),
+    ("snapshot restore", "restore state from snapshot"),
+    ("profile show", "show active data profile"),
+    ("profile list", "list available profiles"),
+    ("profile new <name>", "create a new profile and switch to it"),
+    ("profile use <name>", "switch active profile"),
+    ("ai status", "show AI/Ollama integration status"),
+    ("ai mode [safe|fast]", "set AI safety mode (preview+approve or fast apply)"),
+    ("ai model <name>", "set default Ollama model"),
+    ("ai recommend [count]", "show smart recommendations with explicit reasons"),
+    ("ai enrich [reference|all]", "generate summary/description/tags with preview+approve"),
     ("stats", "show collection and reading stats"),
     ("sheet stats", "show sheet music specific statistics"),
     ("backup", "create backup file"),
@@ -151,6 +187,7 @@ PROMPT_BASE = "alexandria"
 CANCELED = object()
 UNDO_LIMIT = 100
 YES_VALUES = {"y", "yes"}
+SNAPSHOT_DIR_NAME = "snapshots"
 ALIASES = {
     "rm": "remove",
     "ls": "list",
@@ -281,10 +318,40 @@ COMMAND_EXAMPLES.update(
         "list instrument <name>": "alexandria> list instrument piano",
         "list tag <name>": "alexandria> list tag classics",
         "find composer": "alexandria> find composer bach",
+        "search <query>": "alexandria> search marx lang:german rating>=4 unread",
+        "metadata autofill [reference|all]": "alexandria> metadata autofill all",
+        "dedup scan": "alexandria> dedup scan",
+        "dedup merge": "alexandria> dedup merge",
+        "doctor [fix]": "alexandria> doctor fix",
         "sort by <field>": "alexandria> sort by language",
         "authors": "alexandria> authors",
+        "bulk edit": "alexandria> bulk edit",
         "practice": "alexandria> practice",
+        "practice log": "alexandria> practice log",
+        "practice tempo": "alexandria> practice tempo",
+        "series set": "alexandria> series set",
+        "series next [name]": "alexandria> series next dune",
         "sheet stats": "alexandria> sheet stats",
+        "reading plan [weeks]": "alexandria> reading plan 4",
+        "calendar add": "alexandria> calendar add",
+        "calendar list [date]": "alexandria> calendar list 2026-04-01",
+        "calendar done": "alexandria> calendar done",
+        "calendar streak [reading|practice]": "alexandria> calendar streak reading",
+        "inbox add": "alexandria> inbox add",
+        "inbox list": "alexandria> inbox list",
+        "inbox process": "alexandria> inbox process",
+        "snapshot create [name]": "alexandria> snapshot create before-import",
+        "snapshot list": "alexandria> snapshot list",
+        "snapshot restore": "alexandria> snapshot restore",
+        "profile show": "alexandria> profile show",
+        "profile list": "alexandria> profile list",
+        "profile new <name>": "alexandria> profile new school",
+        "profile use <name>": "alexandria> profile use school",
+        "ai status": "alexandria> ai status",
+        "ai mode [safe|fast]": "alexandria> ai mode safe",
+        "ai model <name>": "alexandria> ai model llama3.2",
+        "ai recommend [count]": "alexandria> ai recommend 10",
+        "ai enrich [reference|all]": "alexandria> ai enrich b0001",
         "export obsidian <vault_path>": "alexandria> export obsidian ~/Documents/MyVault",
         "obsidian sync [vault_path]": "alexandria> obsidian sync",
         "obsidian doctor [vault_path]": "alexandria> obsidian doctor",
@@ -309,6 +376,7 @@ def parse_cli_args():
     parser.add_argument("--theme", choices=sorted(THEMES.keys()))
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--no-motion", action="store_true")
+    parser.add_argument("--profile", type=str, default="")
     parser.add_argument("--help", action="store_true")
     args, _unknown = parser.parse_known_args()
     return args
@@ -410,10 +478,28 @@ def format_hint(label: str, value: str) -> str:
     return f"{label}. Use: {value}"
 
 
-def resolve_data_file() -> Path:
+def _sanitize_profile_name(name: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(name or "").strip())
+    cleaned = cleaned.strip("._-")
+    return cleaned or "default"
+
+
+def _profiles_root() -> Path:
+    return Path.home() / ".library_of_alexandria" / "profiles"
+
+
+def _profile_data_file(profile_name: str) -> Path:
+    sanitized = _sanitize_profile_name(profile_name)
+    return _profiles_root() / f"{sanitized}.json"
+
+
+def resolve_data_file(profile_name: str | None = None) -> Path:
     configured = os.getenv("LIBRARY_DATA_FILE", "").strip()
-    if configured:
+    if configured and not profile_name:
         return Path(configured).expanduser()
+
+    if profile_name:
+        return _profile_data_file(profile_name)
 
     candidates = [
         Path.home() / ".library_of_alexandria" / "library_data.json",
@@ -434,9 +520,22 @@ def resolve_data_file() -> Path:
     return Path.cwd() / "library_data.json"
 
 
-def build_prompt(library: Library) -> str:
+def profile_name_from_data_file(data_file: Path) -> str:
+    try:
+        rel = data_file.resolve().relative_to(_profiles_root().resolve())
+    except ValueError:
+        return "default"
+    if rel.parts:
+        return Path(rel.parts[0]).stem
+    return "default"
+
+
+def build_prompt(library: Library, profile_name: str | None = None) -> str:
     total = len(library.books)
     word = "book" if total == 1 else "books"
+    profile = (profile_name or "").strip()
+    if profile and profile != "default":
+        return f"{PROMPT_BASE}[{profile}] ({total} {word})> "
     return f"{PROMPT_BASE} ({total} {word})> "
 
 
@@ -4696,12 +4795,1326 @@ def smart_command_flow(raw_cmd: str, library: Library, undo_stack):
     print_status("Usage: smart add | smart list | smart run | smart remove", "warn")
 
 
-def interactive_demo(library, data_file: Path):
-    history = []
-    undo_stack = []
+def _format_rating_filter(value: str) -> tuple[str, int] | None:
+    match = re.match(r"^rating(<=|>=|=|<|>)(\d)$", value.strip().lower())
+    if not match:
+        return None
+    operator = match.group(1)
+    rating_value = int(match.group(2))
+    if not (1 <= rating_value <= 5):
+        return None
+    return operator, rating_value
+
+
+def _book_matches_rating(book: Book, operator: str, value: int) -> bool:
+    if book.rating is None:
+        return False
+    if operator == "=":
+        return book.rating == value
+    if operator == ">=":
+        return book.rating >= value
+    if operator == "<=":
+        return book.rating <= value
+    if operator == ">":
+        return book.rating > value
+    if operator == "<":
+        return book.rating < value
+    return False
+
+
+def parse_search_query(query: str) -> tuple[dict[str, Any], list[str]]:
+    filters: dict[str, Any] = {}
+    free_terms: list[str] = []
+    try:
+        tokens = shlex.split(query)
+    except ValueError:
+        tokens = query.split()
+
+    for token in tokens:
+        lower = token.lower()
+        if lower in {"read", "unread"}:
+            filters["read"] = lower == "read"
+            continue
+        rating_filter = _format_rating_filter(lower)
+        if rating_filter:
+            filters["rating_filter"] = rating_filter
+            continue
+        if ":" in token:
+            key, value = token.split(":", 1)
+            key = key.strip().lower()
+            value = value.strip()
+            if not value:
+                continue
+            if key in {"lang", "language"}:
+                parsed_language = parse_language(value)
+                if parsed_language:
+                    filters["language"] = parsed_language
+                    continue
+            if key == "location":
+                parsed_location = parse_location(value)
+                if parsed_location:
+                    filters["location"] = parsed_location
+                    continue
+            if key == "genre":
+                filters["genre"] = value.casefold()
+                continue
+            if key == "tag":
+                filters.setdefault("tags", set()).add(value.casefold())
+                continue
+            if key in {"type", "item"}:
+                parsed_type = parse_item_type(value)
+                if parsed_type:
+                    filters["item_type"] = parsed_type
+                    continue
+            if key == "author":
+                filters["author"] = value.casefold()
+                continue
+            if key == "title":
+                filters["title"] = value.casefold()
+                continue
+            if key == "composer":
+                filters["composer"] = value.casefold()
+                continue
+        free_terms.append(token.casefold())
+    return filters, free_terms
+
+
+def run_advanced_search(library: Library, query: str) -> list[Book]:
+    filters, free_terms = parse_search_query(query)
+    results: list[Book] = []
+    for book in library.books:
+        if "read" in filters and book.read != filters["read"]:
+            continue
+        if "language" in filters and book.language != filters["language"]:
+            continue
+        if "location" in filters and book.location != filters["location"]:
+            continue
+        if "item_type" in filters and book.item_type != filters["item_type"]:
+            continue
+        if "genre" in filters and filters["genre"] not in (book.genre or "").casefold():
+            continue
+        if "author" in filters and filters["author"] not in (book.author or "").casefold():
+            continue
+        if "title" in filters and filters["title"] not in (book.title or "").casefold():
+            continue
+        if "composer" in filters and filters["composer"] not in (book.composer or "").casefold():
+            continue
+        tags_filter = filters.get("tags")
+        if tags_filter:
+            tag_keys = {tag.casefold() for tag in book.tags}
+            if not set(tags_filter).issubset(tag_keys):
+                continue
+        if "rating_filter" in filters:
+            operator, value = filters["rating_filter"]
+            if not _book_matches_rating(book, operator, value):
+                continue
+        if free_terms:
+            haystack = " ".join(
+                [
+                    book.title,
+                    book.author,
+                    book.composer or "",
+                    book.genre or "",
+                    " ".join(book.tags),
+                    book.notes or "",
+                    book.instrumentation or "",
+                    book.language,
+                    book.location,
+                ]
+            ).casefold()
+            if not all(term in haystack for term in free_terms):
+                continue
+        results.append(book)
+    results.sort(
+        key=lambda book: (
+            book.read,
+            -(book.rating if book.rating is not None else 0),
+            book.title.casefold(),
+        )
+    )
+    return results
+
+
+def search_command_flow(raw_cmd: str, library: Library) -> None:
+    query = _command_tail(raw_cmd, "search")
+    if not query:
+        query = input("Search query: ").strip()
+    if not query:
+        print_status("Usage: search <query>", "warn")
+        return
+    results = run_advanced_search(library, query)
+    if not results:
+        print_status("No matches.", "info")
+        return
+    print_books(results, f"Search results ({len(results)}): {query}")
+
+
+def _request_json(url: str, *, timeout: float = 7.0) -> dict[str, Any] | None:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "LibraryOfAlexandria/1.0 (+https://github.com/stealthdev-del0/library_of_alexandria)"
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = response.read().decode("utf-8", errors="replace")
+    except (URLError, HTTPError, TimeoutError, OSError):
+        return None
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _openlibrary_metadata_by_isbn(isbn: str) -> dict[str, Any] | None:
+    clean = isbn.strip()
+    if not clean:
+        return None
+    encoded = quote(clean)
+    url = (
+        "https://openlibrary.org/api/books"
+        f"?bibkeys=ISBN:{encoded}&format=json&jscmd=data"
+    )
+    payload = _request_json(url)
+    if not payload:
+        return None
+    return payload.get(f"ISBN:{clean}")
+
+
+def _openlibrary_metadata_by_title_author(title: str, author: str) -> dict[str, Any] | None:
+    params = urlencode({"title": title, "author": author, "limit": 1})
+    url = f"https://openlibrary.org/search.json?{params}"
+    payload = _request_json(url)
+    if not payload:
+        return None
+    docs = payload.get("docs")
+    if not isinstance(docs, list) or not docs:
+        return None
+    doc = docs[0]
+    if not isinstance(doc, dict):
+        return None
+    subjects = doc.get("subject") or []
+    if not isinstance(subjects, list):
+        subjects = []
+    return {
+        "publish_year": doc.get("first_publish_year"),
+        "number_of_pages_median": doc.get("number_of_pages_median"),
+        "subjects": subjects[:8],
+    }
+
+
+def _metadata_updates_for_book(book: Book) -> dict[str, Any] | None:
+    if book.item_type != "Book":
+        return None
+    source = None
+    if book.isbn:
+        source = _openlibrary_metadata_by_isbn(book.isbn)
+    if source is None:
+        source = _openlibrary_metadata_by_title_author(book.title, book.author)
+    if source is None:
+        return None
+
+    updates: dict[str, Any] = {}
+    year_value = source.get("publish_year")
+    if isinstance(year_value, list):
+        year_value = next((item for item in year_value if isinstance(item, int)), None)
+    if isinstance(year_value, int) and book.year is None:
+        updates["year"] = year_value
+
+    pages_value = source.get("number_of_pages")
+    if pages_value is None:
+        pages_value = source.get("number_of_pages_median")
+    if isinstance(pages_value, int) and pages_value > 0 and book.pages is None:
+        updates["pages"] = pages_value
+
+    subjects = source.get("subjects") or source.get("subject") or []
+    subject_names: list[str] = []
+    if isinstance(subjects, list):
+        for entry in subjects:
+            if isinstance(entry, dict):
+                name = str(entry.get("name", "")).strip()
+            else:
+                name = str(entry).strip()
+            if name:
+                subject_names.append(name)
+    if subject_names:
+        if not book.genre:
+            updates["genre"] = ", ".join(subject_names[:2])
+        incoming_tags = parse_tags(",".join(subject_names[:6]))
+        if incoming_tags:
+            merged = parse_tags(",".join(book.tags + incoming_tags))
+            if merged != book.tags:
+                updates["tags"] = merged
+    return updates or None
+
+
+def metadata_autofill_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
+    tail = _command_tail(raw_cmd, "metadata autofill")
+    target_arg = tail.strip().lower()
+    if not target_arg:
+        target_arg = input("Target (reference/all): ").strip().lower()
+    if target_arg == "all":
+        targets = [book for book in library.books if book.item_type == "Book"]
+    else:
+        book = resolve_book_reference(library, target_arg) if target_arg else None
+        if not book:
+            book = ask_book_reference(library, "Item reference (ID/ISBN/title/author): ")
+        if not book:
+            print_status("Item not found.", "warn")
+            return
+        targets = [book]
+
+    safe_mode = bool(library.ai_settings.get("safe_mode", True))
+    updated_count = 0
+    skipped_count = 0
+    snapshot = library.export_state()
+
+    with spinner("Fetching metadata"):
+        for item in targets:
+            updates = _metadata_updates_for_book(item)
+            if not updates:
+                skipped_count += 1
+                continue
+            if safe_mode:
+                summary = ", ".join(f"{key}={value}" for key, value in updates.items())
+                if not confirm_action(f"Apply metadata to {item.book_id} ({item.title}) -> {summary}?"):
+                    skipped_count += 1
+                    continue
+            try:
+                changed = library.edit_book(item.book_id, **updates)
+            except (StorageError, ValueError):
+                skipped_count += 1
+                continue
+            if changed:
+                updated_count += 1
+            else:
+                skipped_count += 1
+
+    if updated_count > 0:
+        push_undo(undo_stack, snapshot)
+        print_result("Metadata autofill", "Updated", f"updated={updated_count}, skipped={skipped_count}")
+    else:
+        print_result("Metadata autofill", "No change", f"skipped={skipped_count}")
+
+
+def dedup_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
+    normalized = raw_cmd.strip().lower()
+    if normalized.startswith("dedup scan"):
+        tail = _command_tail(raw_cmd, "dedup scan")
+        threshold = 0.88
+        if tail:
+            try:
+                threshold = float(tail)
+            except ValueError:
+                print_status(format_hint("Invalid threshold", "a number like 0.88"), "warn")
+                return
+        findings = library.find_potential_duplicates(threshold=threshold)
+        if not findings:
+            print_status("No potential duplicates found.", "info")
+            return
+        rows = [
+            [
+                item["left_id"],
+                truncate(item["left_title"], 28),
+                item["right_id"],
+                truncate(item["right_title"], 28),
+                f"{item['score']:.3f}",
+                truncate(item["reason"], 28),
+            ]
+            for item in findings[:60]
+        ]
+        print(style(f"Potential Duplicates ({len(findings)})", "bold"))
+        print_table(rows, ["ID A", "Title A", "ID B", "Title B", "Score", "Reason"], right_align={4})
+        print()
+        return
+
+    if normalized.startswith("dedup merge"):
+        first = ask_book_reference(library, "Primary item reference (kept): ")
+        if not first:
+            print_status("Primary item not found.", "warn")
+            return
+        second = ask_book_reference(library, "Duplicate item reference (removed): ")
+        if not second:
+            print_status("Duplicate item not found.", "warn")
+            return
+        if first.book_id == second.book_id:
+            print_status("Choose two different items.", "warn")
+            return
+        if not confirm_action(
+            f"Merge duplicate {second.book_id} into {first.book_id} and remove {second.book_id}?"
+        ):
+            print_result("Dedup merge", "Canceled")
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.merge_items(first.book_id, second.book_id)
+        except (StorageError, ValueError) as exc:
+            print_result("Dedup merge", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Dedup merge", "Updated", f"kept={first.book_id}, removed={second.book_id}")
+        else:
+            print_result("Dedup merge", "No change")
+        return
+
+    print_status("Usage: dedup scan [threshold] | dedup merge", "warn")
+
+
+def doctor_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
+    fix = raw_cmd.strip().lower() in {"doctor fix", "doctor --fix", "doctor -f"}
+    snapshot = library.export_state() if fix else None
+    report = library.doctor_data(fix=fix)
+    rows = [
+        ["Items", str(report.get("items", 0))],
+        ["Invalid language", str(report.get("invalid_language", 0))],
+        ["Invalid cover", str(report.get("invalid_cover", 0))],
+        ["Invalid location", str(report.get("invalid_location", 0))],
+        ["Invalid rating", str(report.get("invalid_rating", 0))],
+        ["Negative progress", str(report.get("negative_progress", 0))],
+        ["Duplicate tags", str(report.get("duplicate_tags", 0))],
+    ]
+    if fix:
+        rows.append(["Fixed entries", str(report.get("fixed", 0))])
+    print(style("Data Doctor", "bold"))
+    print_table(rows, ["Metric", "Value"], right_align={1})
+    print()
+    if fix and report.get("fixed", 0) > 0 and snapshot is not None:
+        push_undo(undo_stack, snapshot)
+        print_result("Doctor", "Updated", f"fixed={report.get('fixed', 0)}")
+    elif fix:
+        print_result("Doctor", "No change")
+    else:
+        print_result("Doctor", "Done", "Use `doctor fix` to auto-fix")
+
+
+def bulk_edit_command_flow(library: Library, undo_stack) -> None:
+    mode = input("Target mode (references/filter): ").strip().lower()
+    references: list[str] | None = None
+    filters: dict[str, Any] | None = None
+    if mode in {"references", "ref"}:
+        raw_refs = input("References (comma-separated IDs/ISBN/titles): ").strip()
+        refs = [item.strip() for item in raw_refs.split(",") if item.strip()]
+        if not refs:
+            print_status("At least one reference is required.", "warn")
+            return
+        references = refs
+    elif mode in {"filter", "filters"}:
+        filters = {}
+        read_raw = input("Read filter (read/unread/any): ").strip()
+        try:
+            filters["read"] = parse_read_filter(read_raw)
+        except ValueError:
+            print_status(format_hint("Invalid read filter", "read | unread | any"), "warn")
+            return
+        location_raw = input("Location filter (Pforta/Zuhause/any): ").strip()
+        location_value = parse_optional_location(location_raw)
+        if location_raw and location_value is None and location_raw.lower() not in {"any", "*"}:
+            print_status(format_hint("Invalid location filter", "Pforta | Zuhause | any"), "warn")
+            return
+        filters["location"] = location_value
+        genre_raw = input("Genre filter (optional): ").strip()
+        if genre_raw:
+            filters["genre"] = genre_raw
+        min_rating_raw = input("Minimum rating filter 1-5 (optional): ").strip()
+        if min_rating_raw:
+            try:
+                filters["min_rating"] = int(min_rating_raw)
+            except ValueError:
+                print_status(format_hint("Invalid rating filter", "1 to 5"), "warn")
+                return
+        tags_raw = input("Required tags filter (comma-separated, optional): ").strip()
+        if tags_raw:
+            filters["tags"] = parse_tags(tags_raw)
+    else:
+        print_status(format_hint("Invalid mode", "references | filter"), "warn")
+        return
+
+    updates: dict[str, Any] = {}
+    genre_update = input("Set genre (blank = unchanged): ").strip()
+    if genre_update:
+        updates["genre"] = genre_update
+    language_update_raw = input("Set language (German/English/French/Japanese, blank = unchanged): ").strip()
+    if language_update_raw:
+        parsed_language = parse_language(language_update_raw)
+        if parsed_language is None:
+            print_status(format_hint("Invalid language", "German | English | French | Japanese"), "warn")
+            return
+        updates["language"] = parsed_language
+    location_update_raw = input("Set location (Pforta/Zuhause, blank = unchanged): ").strip()
+    if location_update_raw:
+        parsed_location = parse_location(location_update_raw)
+        if parsed_location is None:
+            print_status(format_hint("Invalid location", "Pforta | Zuhause"), "warn")
+            return
+        updates["location"] = parsed_location
+    cover_update_raw = input("Set cover (Hardcover/Softcover, blank = unchanged): ").strip()
+    if cover_update_raw:
+        parsed_cover = parse_cover(cover_update_raw)
+        if parsed_cover is None:
+            print_status(format_hint("Invalid cover", "Hardcover | Softcover"), "warn")
+            return
+        updates["cover"] = parsed_cover
+    set_tags_raw = input("Set tags (comma-separated, blank = unchanged): ").strip()
+    if set_tags_raw:
+        updates["set_tags"] = parse_tags(set_tags_raw)
+    add_tags_raw = input("Add tags (comma-separated, blank = unchanged): ").strip()
+    if add_tags_raw:
+        updates["add_tags"] = parse_tags(add_tags_raw)
+    remove_tags_raw = input("Remove tags (comma-separated, blank = unchanged): ").strip()
+    if remove_tags_raw:
+        updates["remove_tags"] = parse_tags(remove_tags_raw)
+    series_name_update = input("Set series name (blank = unchanged): ").strip()
+    if series_name_update:
+        updates["series_name"] = series_name_update
+    series_index_raw = input("Set series index (positive integer, blank = unchanged): ").strip()
+    if series_index_raw:
+        try:
+            updates["series_index"] = int(series_index_raw)
+        except ValueError:
+            print_status(format_hint("Invalid series index", "a positive integer"), "warn")
+            return
+
+    if not updates:
+        print_result("Bulk edit", "Canceled", "No updates provided")
+        return
+
+    snapshot = library.export_state()
+    try:
+        result = library.bulk_edit(references=references, filters=filters, updates=updates)
+    except (StorageError, ValueError) as exc:
+        print_result("Bulk edit", "Failed", str(exc))
+        return
+    if result.get("updated", 0) > 0:
+        push_undo(undo_stack, snapshot)
+        print_result(
+            "Bulk edit",
+            "Updated",
+            f"targets={result.get('targets', 0)}, updated={result.get('updated', 0)}, skipped={result.get('skipped', 0)}",
+        )
+    else:
+        print_result(
+            "Bulk edit",
+            "No change",
+            f"targets={result.get('targets', 0)}, skipped={result.get('skipped', 0)}",
+        )
+
+
+def practice_extended_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
+    cmd = raw_cmd.strip().lower()
+    if cmd == "practice":
+        practice_command_flow(library, undo_stack)
+        return
+    if cmd.startswith("practice tempo"):
+        book = ask_book_reference(library, "Sheet music reference (ID/ISBN/title/composer): ")
+        if not book:
+            print_status("Item not found.", "warn")
+            return
+        bpm_text = input("Tempo target bpm (blank clears): ").strip()
+        bpm_value: int | None
+        if not bpm_text:
+            bpm_value = None
+        else:
+            try:
+                bpm_value = int(bpm_text)
+            except ValueError:
+                print_status(format_hint("Invalid bpm", "a positive integer"), "warn")
+                return
+        snapshot = library.export_state()
+        try:
+            changed = library.set_tempo_target(book.book_id, bpm_value)
+        except (StorageError, ValueError) as exc:
+            print_result("Practice tempo", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Practice tempo", "Updated", f"(ID: {book.book_id})")
+        else:
+            print_result("Practice tempo", "No change")
+        return
+    if cmd.startswith("practice log"):
+        book = ask_book_reference(library, "Sheet music reference (ID/ISBN/title/composer): ")
+        if not book:
+            print_status("Item not found.", "warn")
+            return
+        minutes_raw = input("Practice minutes: ").strip()
+        try:
+            minutes = int(minutes_raw)
+        except ValueError:
+            print_status(format_hint("Invalid minutes", "a positive integer"), "warn")
+            return
+        bpm_raw = input("BPM reached (optional): ").strip()
+        bpm_value = None
+        if bpm_raw:
+            try:
+                bpm_value = int(bpm_raw)
+            except ValueError:
+                print_status(format_hint("Invalid bpm", "a positive integer"), "warn")
+                return
+        date_raw = input("Practice date YYYY-MM-DD (blank = today): ").strip() or None
+        status_raw = input("Set practice status (optional): ").strip()
+        status_value = parse_practice_status(status_raw) if status_raw else None
+        if status_raw and status_value is None:
+            print_status(
+                format_hint("Invalid practice status", " | ".join(ALLOWED_PRACTICE_STATUSES)),
+                "warn",
+            )
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.log_practice(
+                book.book_id,
+                minutes=minutes,
+                bpm=bpm_value,
+                practiced_on=date_raw,
+                mark_done_status=status_value,
+            )
+        except (StorageError, ValueError) as exc:
+            print_result("Practice log", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Practice log", "Updated", f"(ID: {book.book_id}, +{minutes} min)")
+        else:
+            print_result("Practice log", "No change")
+        return
+    print_status("Usage: practice | practice log | practice tempo", "warn")
+
+
+def series_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
+    cmd = raw_cmd.strip().lower()
+    if cmd.startswith("series set"):
+        book = ask_book_reference(library, "Item reference (ID/ISBN/title/author): ")
+        if not book:
+            print_status("Item not found.", "warn")
+            return
+        name = input("Series name (blank clears): ").strip()
+        index_raw = input("Series index (blank clears): ").strip()
+        index_value = None
+        if index_raw:
+            try:
+                index_value = int(index_raw)
+            except ValueError:
+                print_status(format_hint("Invalid series index", "a positive integer"), "warn")
+                return
+        snapshot = library.export_state()
+        try:
+            changed = library.set_series(book.book_id, name, index_value)
+        except (StorageError, ValueError) as exc:
+            print_result("Series set", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Series set", "Updated", f"(ID: {book.book_id})")
+        else:
+            print_result("Series set", "No change")
+        return
+
+    if cmd.startswith("series next"):
+        name = _command_tail(raw_cmd, "series next")
+        items = library.next_in_series(name or None)
+        if not items:
+            print_status("No unread series entries found.", "info")
+            return
+        label = f"Next in series: {name}" if name else "Next in all series"
+        print_books(items, label)
+        return
+
+    print_status("Usage: series set | series next [name]", "warn")
+
+
+def reading_plan_command_flow(raw_cmd: str, library: Library) -> None:
+    weeks_raw = _command_tail(raw_cmd, "reading plan")
+    weeks = 4
+    if weeks_raw:
+        try:
+            weeks = int(weeks_raw)
+        except ValueError:
+            print_status(format_hint("Invalid weeks", "a positive integer"), "warn")
+            return
+    minutes_raw = input("Available minutes per week: ").strip()
+    try:
+        minutes = int(minutes_raw)
+    except ValueError:
+        print_status(format_hint("Invalid minutes", "a positive integer"), "warn")
+        return
+    try:
+        plan = library.create_reading_plan(minutes, weeks=weeks)
+    except ValueError as exc:
+        print_status(str(exc), "warn")
+        return
+    if not plan:
+        print_status("No plan could be generated.", "info")
+        return
+    print(style("Reading Plan", "bold"))
+    for week in plan:
+        print(
+            f"Week {week['week']}: {week['planned_pages']}/{week['capacity_pages']} planned pages"
+        )
+        for entry in week["entries"]:
+            print(f"  - {entry['book_id']}: {entry['title']} ({entry['planned_pages']} p)")
+    print()
+
+
+def calendar_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
+    cmd = raw_cmd.strip().lower()
+    if cmd.startswith("calendar add"):
+        book = ask_book_reference(library, "Item reference (ID/ISBN/title/author): ")
+        if not book:
+            print_status("Item not found.", "warn")
+            return
+        when_raw = input("Date (YYYY-MM-DD): ").strip()
+        if not when_raw:
+            when_raw = date.today().isoformat()
+        minutes_raw = input("Minutes: ").strip()
+        try:
+            minutes = int(minutes_raw)
+        except ValueError:
+            print_status(format_hint("Invalid minutes", "a positive integer"), "warn")
+            return
+        kind_raw = input("Kind (reading/practice, default reading): ").strip().lower() or "reading"
+        if kind_raw not in {"reading", "practice"}:
+            print_status(format_hint("Invalid kind", "reading | practice"), "warn")
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.schedule_session(book.book_id, when=when_raw, minutes=minutes, kind=kind_raw)
+        except (StorageError, ValueError) as exc:
+            print_result("Calendar add", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Calendar add", "Saved", f"(ID: {book.book_id}, date={when_raw})")
+        else:
+            print_result("Calendar add", "No change")
+        return
+
+    if cmd.startswith("calendar list"):
+        day = _command_tail(raw_cmd, "calendar list") or date.today().isoformat()
+        sessions = library.sessions_on(day)
+        if not sessions:
+            print_status(f"No sessions on {day}.", "info")
+            return
+        rows = []
+        for session in sessions:
+            book = library.get_by_book_id(str(session.get("book_id", "")))
+            title = book.title if book else "-"
+            rows.append(
+                [
+                    str(session.get("id", "-")),
+                    str(session.get("kind", "-")),
+                    title,
+                    str(session.get("minutes", "-")),
+                    "yes" if session.get("done") else "no",
+                ]
+            )
+        print(style(f"Calendar {day}", "bold"))
+        print_table(rows, ["Session", "Kind", "Title", "Minutes", "Done"], right_align={3})
+        print()
+        return
+
+    if cmd.startswith("calendar done"):
+        session_id = _command_tail(raw_cmd, "calendar done")
+        if not session_id:
+            session_id = input("Session ID: ").strip()
+        if not session_id:
+            print_status("Session ID is required.", "warn")
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.mark_session_done(session_id)
+        except StorageError as exc:
+            print_result("Calendar done", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Calendar done", "Updated", session_id)
+        else:
+            print_result("Calendar done", "No change")
+        return
+
+    if cmd.startswith("calendar streak"):
+        tail = _command_tail(raw_cmd, "calendar streak").strip().lower()
+        kind = "reading"
+        if tail in {"reading", "practice"}:
+            kind = tail
+        elif tail:
+            print_status(format_hint("Invalid streak kind", "reading | practice"), "warn")
+            return
+        value = library.streak(kind=kind)
+        print_result("Calendar streak", "Done", f"{kind}={value} day(s)")
+        return
+
+    print_status("Usage: calendar add | calendar list [date] | calendar done | calendar streak [reading|practice]", "warn")
+
+
+def inbox_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
+    cmd = raw_cmd.strip().lower()
+    if cmd.startswith("inbox add"):
+        text = _command_tail(raw_cmd, "inbox add")
+        if not text:
+            text = input("Inbox text: ").strip()
+        if not text:
+            print_status("Inbox text is required.", "warn")
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.add_inbox_item(text)
+        except StorageError as exc:
+            print_result("Inbox add", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Inbox add", "Saved")
+        else:
+            print_result("Inbox add", "No change")
+        return
+
+    if cmd.startswith("inbox list"):
+        status = _command_tail(raw_cmd, "inbox list").strip().lower() or None
+        if status not in {None, "open", "done", "processed"}:
+            print_status(format_hint("Invalid status", "open | done | processed"), "warn")
+            return
+        items = library.list_inbox_items(status=status)
+        if not items:
+            print_status("Inbox is empty.", "info")
+            return
+        rows = [
+            [
+                item.get("id", "-"),
+                truncate(item.get("text", "-"), 44),
+                item.get("status", "-"),
+                item.get("created_at", "-"),
+            ]
+            for item in items
+        ]
+        print(style("Inbox", "bold"))
+        print_table(rows, ["ID", "Text", "Status", "Created"], max_widths={"Text": 48})
+        print()
+        return
+
+    if cmd.startswith("inbox done"):
+        inbox_id = _command_tail(raw_cmd, "inbox done")
+        if not inbox_id:
+            inbox_id = input("Inbox ID: ").strip()
+        if not inbox_id:
+            print_status("Inbox ID is required.", "warn")
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.set_inbox_status(inbox_id, "done")
+        except StorageError as exc:
+            print_result("Inbox done", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Inbox done", "Updated", inbox_id)
+        else:
+            print_result("Inbox done", "No change")
+        return
+
+    if cmd.startswith("inbox remove"):
+        inbox_id = _command_tail(raw_cmd, "inbox remove")
+        if not inbox_id:
+            inbox_id = input("Inbox ID: ").strip()
+        if not inbox_id:
+            print_status("Inbox ID is required.", "warn")
+            return
+        if not confirm_action(f"Remove inbox entry {inbox_id}?"):
+            print_result("Inbox remove", "Canceled")
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.remove_inbox_item(inbox_id)
+        except StorageError as exc:
+            print_result("Inbox remove", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("Inbox remove", "Updated", inbox_id)
+        else:
+            print_result("Inbox remove", "No change")
+        return
+
+    if cmd.startswith("inbox process"):
+        inbox_id = _command_tail(raw_cmd, "inbox process")
+        if not inbox_id:
+            inbox_id = input("Inbox ID to process: ").strip()
+        if not inbox_id:
+            print_status("Inbox ID is required.", "warn")
+            return
+        item = next((entry for entry in library.list_inbox_items() if str(entry.get("id", "")).casefold() == inbox_id.casefold()), None)
+        if not item:
+            print_status("Inbox item not found.", "warn")
+            return
+        if str(item.get("status", "")).lower() not in {"open", "todo", ""}:
+            print_status("Inbox item is already processed/done.", "warn")
+            return
+        print(style(f"Processing inbox: {item.get('text', '')}", "bold"))
+        title = input(f"Title [{item.get('text', '')}]: ").strip() or str(item.get("text", "")).strip()
+        item_type_raw = input("Type (Book/SheetMusic, default Book): ").strip()
+        item_type = parse_item_type(item_type_raw) if item_type_raw else "Book"
+        if item_type is None:
+            print_status(format_hint("Invalid type", "Book | SheetMusic"), "warn")
+            return
+        if item_type == "SheetMusic":
+            composer = input("Composer: ").strip()
+            if not composer:
+                print_status("Composer is required for sheet music.", "warn")
+                return
+            author = composer
+            instrumentation = input("Instrumentation (optional): ").strip()
+            practice_status = "Unstarted"
+        else:
+            author = input("Author: ").strip()
+            if not author:
+                print_status("Author is required.", "warn")
+                return
+            composer = ""
+            instrumentation = ""
+            practice_status = ""
+        genre = input("Genre (optional): ").strip()
+        language_raw = input("Language (German/English/French/Japanese, default English): ").strip()
+        language = "English" if not language_raw else parse_language(language_raw)
+        if language is None:
+            print_status(format_hint("Invalid language", "German | English | French | Japanese"), "warn")
+            return
+        location_raw = input("Location (Pforta/Zuhause, default Zuhause): ").strip()
+        location = "Zuhause" if not location_raw else parse_location(location_raw)
+        if location is None:
+            print_status(format_hint("Invalid location", "Pforta | Zuhause"), "warn")
+            return
+        cover_raw = input("Cover (Hardcover/Softcover, default Softcover): ").strip()
+        cover = "Softcover" if not cover_raw else parse_cover(cover_raw)
+        if cover is None:
+            print_status(format_hint("Invalid cover", "Hardcover | Softcover"), "warn")
+            return
+        tags = parse_tags(input("Tags (comma-separated, optional): ").strip())
+        new_entry = Book(
+            title=title,
+            author=author,
+            genre=genre,
+            language=language,
+            location=location,
+            cover=cover,
+            tags=tags,
+            item_type=item_type,
+            composer=composer,
+            instrumentation=instrumentation,
+            practice_status=practice_status,
+        )
+        snapshot = library.export_state()
+        try:
+            added = library.add_book(new_entry)
+            processed = library.set_inbox_status(inbox_id, "processed")
+        except (StorageError, ValueError) as exc:
+            print_result("Inbox process", "Failed", str(exc))
+            return
+        if added or processed:
+            push_undo(undo_stack, snapshot)
+            print_result("Inbox process", "Updated", f"added={new_entry.book_id or '-'}")
+        else:
+            print_result("Inbox process", "No change", "Duplicate entry")
+        return
+
+    print_status("Usage: inbox add | inbox list [status] | inbox process | inbox done | inbox remove", "warn")
+
+
+def _snapshot_dir(data_file: Path) -> Path:
+    path = data_file.parent / SNAPSHOT_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _snapshot_files(data_file: Path) -> list[Path]:
+    directory = _snapshot_dir(data_file)
+    return sorted(directory.glob("snapshot_*.json"), reverse=True)
+
+
+def snapshot_command_flow(raw_cmd: str, library: Library, data_file: Path, undo_stack) -> None:
+    cmd = raw_cmd.strip().lower()
+    if cmd.startswith("snapshot create"):
+        name = _command_tail(raw_cmd, "snapshot create")
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "-", name.strip()).strip("-")
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = f"_{safe_name}" if safe_name else ""
+        path = _snapshot_dir(data_file) / f"snapshot_{stamp}{suffix}.json"
+        try:
+            with path.open("w", encoding="utf-8") as handle:
+                json.dump(library.export_state(), handle, indent=2, ensure_ascii=False)
+                handle.write("\n")
+        except OSError as exc:
+            print_result("Snapshot create", "Failed", str(exc))
+            return
+        print_result("Snapshot create", "Saved", str(path))
+        return
+
+    if cmd.startswith("snapshot list"):
+        files = _snapshot_files(data_file)
+        if not files:
+            print_status("No snapshots found.", "info")
+            return
+        rows = [[str(index), file.name, datetime.fromtimestamp(file.stat().st_mtime).isoformat(sep=" ", timespec="seconds")] for index, file in enumerate(files, 1)]
+        print(style("Snapshots", "bold"))
+        print_table(rows, ["#", "File", "Modified"], right_align={0})
+        print()
+        return
+
+    if cmd.startswith("snapshot restore"):
+        files = _snapshot_files(data_file)
+        if not files:
+            print_status("No snapshots found.", "warn")
+            return
+        choice = _command_tail(raw_cmd, "snapshot restore")
+        if not choice:
+            print(style("Snapshots", "bold"))
+            for index, file in enumerate(files, 1):
+                print(f"  {index:>2}. {file.name}")
+            choice = input("Snapshot number or filename: ").strip()
+        if not choice:
+            print_result("Snapshot restore", "Canceled")
+            return
+        target: Path | None = None
+        if choice.isdigit():
+            index = int(choice)
+            if 1 <= index <= len(files):
+                target = files[index - 1]
+        if target is None:
+            for file in files:
+                if file.name == choice or choice in file.name:
+                    target = file
+                    break
+        if target is None:
+            print_status("Snapshot not found.", "warn")
+            return
+        if not confirm_action(f"Restore snapshot {target.name}?"):
+            print_result("Snapshot restore", "Canceled")
+            return
+        snapshot = library.export_state()
+        try:
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            library.restore_state(payload, persist=True)
+        except (OSError, json.JSONDecodeError, StorageError, ValueError) as exc:
+            print_result("Snapshot restore", "Failed", str(exc))
+            return
+        push_undo(undo_stack, snapshot)
+        print_result("Snapshot restore", "Updated", target.name)
+        return
+
+    print_status("Usage: snapshot create [name] | snapshot list | snapshot restore", "warn")
+
+
+def profile_command_flow(raw_cmd: str, library: Library, data_file: Path) -> tuple[Library, Path, bool]:
+    cmd = raw_cmd.strip().lower()
+    active_profile = profile_name_from_data_file(data_file)
+    if cmd.startswith("profile show"):
+        print(style("Profile", "bold"))
+        print(f"  Active: {active_profile}")
+        print(f"  Data:   {data_file}")
+        print()
+        return library, data_file, False
+
+    if cmd.startswith("profile list"):
+        root = _profiles_root()
+        root.mkdir(parents=True, exist_ok=True)
+        profiles = sorted(path.stem for path in root.glob("*.json"))
+        if "default" not in profiles:
+            profiles.insert(0, "default")
+        rows = [[name, "*" if name == active_profile else "", str(resolve_data_file(name if name != "default" else None))] for name in profiles]
+        print(style("Profiles", "bold"))
+        print_table(rows, ["Name", "Active", "Data file"])
+        print()
+        return library, data_file, False
+
+    if cmd.startswith("profile new"):
+        name = _command_tail(raw_cmd, "profile new")
+        if not name:
+            name = input("New profile name: ").strip()
+        sanitized = _sanitize_profile_name(name)
+        if not sanitized:
+            print_status("Profile name is required.", "warn")
+            return library, data_file, False
+        target = resolve_data_file(sanitized)
+        if target.exists():
+            print_status("Profile already exists. Switching to existing profile.", "info")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            try:
+                target.write_text(json.dumps(Library(data_path=target).export_state(), indent=2) + "\n", encoding="utf-8")
+            except OSError as exc:
+                print_result("Profile new", "Failed", str(exc))
+                return library, data_file, False
+        next_library = load_library(target)
+        print_result("Profile", "Updated", f"active={sanitized}")
+        return next_library, target, True
+
+    if cmd.startswith("profile use"):
+        name = _command_tail(raw_cmd, "profile use")
+        if not name:
+            name = input("Profile name: ").strip()
+        sanitized = _sanitize_profile_name(name)
+        if not sanitized:
+            print_status("Profile name is required.", "warn")
+            return library, data_file, False
+        target = resolve_data_file(sanitized)
+        next_library = load_library(target)
+        print_result("Profile", "Updated", f"active={sanitized}")
+        return next_library, target, True
+
+    print_status("Usage: profile show | profile list | profile new <name> | profile use <name>", "warn")
+    return library, data_file, False
+
+
+def _ollama_api_request(path: str, payload: dict[str, Any] | None = None, timeout: float = 20.0) -> dict[str, Any] | None:
+    url = f"http://127.0.0.1:11434{path}"
+    data_bytes = None
+    headers = {"Content-Type": "application/json"}
+    if payload is not None:
+        data_bytes = json.dumps(payload).encode("utf-8")
+    request = Request(url, headers=headers, data=data_bytes, method="POST" if payload is not None else "GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except (URLError, HTTPError, TimeoutError, OSError):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _ai_status_summary(model_name: str) -> tuple[bool, list[str]]:
+    payload = _ollama_api_request("/api/tags")
+    if not payload:
+        return False, []
+    models = payload.get("models", [])
+    if not isinstance(models, list):
+        return True, []
+    names = []
+    for model in models:
+        if isinstance(model, dict):
+            name = str(model.get("name", "")).strip()
+            if name:
+                names.append(name)
+    has_model = any(name == model_name or name.startswith(model_name + ":") for name in names)
+    return has_model, names
+
+
+def _fallback_ai_description(book: Book) -> tuple[str, str, list[str]]:
+    creator = book.composer if book.item_type == "SheetMusic" else book.author
+    summary = (
+        f"{book.title} by {creator} is tracked in your Alexandria library."
+        f" Genre: {book.genre or 'n/a'}, language: {book.language}, location: {book.location}."
+    )
+    if book.item_type == "SheetMusic":
+        author_note = (
+            f"{creator} appears in your sheet-music collection."
+            f" Instrumentation: {book.instrumentation or 'n/a'}."
+        )
+    else:
+        author_note = (
+            f"{creator} appears in your library."
+            f" Read status: {'read' if book.read else 'unread'}."
+        )
+    tags = parse_tags(",".join([book.genre, *book.tags, book.language, book.location]))
+    return summary, author_note, tags[:8]
+
+
+def _ollama_enrich_book(book: Book, model_name: str) -> tuple[str, str, list[str]] | None:
+    creator = book.composer if book.item_type == "SheetMusic" else book.author
+    prompt = (
+        "Return strict JSON with keys summary, author_note, tags."
+        " Keep summary under 60 words and author_note under 40 words."
+        " tags must be an array of 3-8 lowercase tags.\n"
+        f"Item type: {book.item_type}\n"
+        f"Title: {book.title}\n"
+        f"Creator: {creator}\n"
+        f"Genre: {book.genre}\n"
+        f"Language: {book.language}\n"
+        f"Existing tags: {', '.join(book.tags)}\n"
+        f"Notes: {book.notes[:280]}\n"
+    )
+    payload = _ollama_api_request(
+        "/api/generate",
+        {"model": model_name, "prompt": prompt, "stream": False, "format": "json"},
+        timeout=35.0,
+    )
+    if not payload:
+        return None
+    response_text = str(payload.get("response", "")).strip()
+    if not response_text:
+        return None
+    try:
+        parsed = json.loads(response_text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    summary = str(parsed.get("summary", "")).strip()
+    author_note = str(parsed.get("author_note", "")).strip()
+    tags = parse_tags(",".join(str(item) for item in parsed.get("tags", []) if str(item).strip()))
+    if not summary:
+        return None
+    return summary, author_note, tags
+
+
+def ai_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
+    cmd = raw_cmd.strip().lower()
+    safe_mode = bool(library.ai_settings.get("safe_mode", True))
+    model_name = str(library.ai_settings.get("model", "llama3.2")).strip() or "llama3.2"
+
+    if cmd.startswith("ai status"):
+        available, models = _ai_status_summary(model_name)
+        print(style("AI Status", "bold"))
+        print(f"  Safe mode: {'safe (preview+approve)' if safe_mode else 'fast (auto-apply)'}")
+        print(f"  Model:     {model_name}")
+        print(f"  Ollama:    {'online' if models else 'offline'}")
+        if models:
+            print(f"  Installed: {', '.join(models[:8])}")
+        print()
+        if models and not available:
+            print_status("Configured model not installed in Ollama.", "warn")
+        return
+
+    if cmd.startswith("ai mode"):
+        mode = _command_tail(raw_cmd, "ai mode").strip().lower()
+        if not mode:
+            print_result("AI mode", "Done", "safe" if safe_mode else "fast")
+            return
+        if mode not in {"safe", "fast"}:
+            print_status(format_hint("Invalid mode", "safe | fast"), "warn")
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.set_ai_settings(safe_mode=(mode == "safe"))
+        except StorageError as exc:
+            print_result("AI mode", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("AI mode", "Updated", mode)
+        else:
+            print_result("AI mode", "No change")
+        return
+
+    if cmd.startswith("ai model"):
+        model = _command_tail(raw_cmd, "ai model").strip()
+        if not model:
+            print_status("Usage: ai model <name>", "warn")
+            return
+        snapshot = library.export_state()
+        try:
+            changed = library.set_ai_settings(model=model)
+        except StorageError as exc:
+            print_result("AI model", "Failed", str(exc))
+            return
+        if changed:
+            push_undo(undo_stack, snapshot)
+            print_result("AI model", "Updated", model)
+        else:
+            print_result("AI model", "No change")
+        return
+
+    if cmd.startswith("ai recommend"):
+        tail = _command_tail(raw_cmd, "ai recommend").strip()
+        count = 10
+        if tail:
+            try:
+                count = int(tail)
+            except ValueError:
+                print_status(format_hint("Invalid count", "a positive integer"), "warn")
+                return
+        try:
+            recommendations = library.recommend_books_with_reasons(limit=count)
+        except ValueError as exc:
+            print_status(str(exc), "warn")
+            return
+        if not recommendations:
+            print_status("No recommendations found.", "info")
+            return
+        rows = [
+            [
+                item["book"].book_id,
+                truncate(item["book"].title, 26),
+                truncate(item["book"].author, 20),
+                f"{item['score']:.2f}",
+                truncate(", ".join(item["reasons"]), 44),
+            ]
+            for item in recommendations
+        ]
+        print(style("AI Recommendations", "bold"))
+        print_table(rows, ["ID", "Title", "Author", "Score", "Reasons"], right_align={3})
+        print()
+        return
+
+    if cmd.startswith("ai enrich"):
+        tail = _command_tail(raw_cmd, "ai enrich").strip()
+        if not tail:
+            tail = input("Target (reference/all): ").strip()
+        if not tail:
+            print_status("Usage: ai enrich [reference|all]", "warn")
+            return
+        if tail.lower() == "all":
+            targets = library.books[:]
+        else:
+            selected = resolve_book_reference(library, tail)
+            if not selected:
+                print_status("Item not found.", "warn")
+                return
+            targets = [selected]
+        snapshot = library.export_state()
+        updated = 0
+        skipped = 0
+        with spinner("Generating AI enrichments"):
+            for book in targets:
+                generated = _ollama_enrich_book(book, model_name)
+                if generated is None:
+                    generated = _fallback_ai_description(book)
+                summary, author_note, ai_tags = generated
+                preview = f"summary='{truncate(summary, 56)}', tags={', '.join(ai_tags[:5]) or '-'}"
+                if safe_mode and not confirm_action(f"Apply AI enrichment to {book.book_id} ({book.title}) -> {preview}?"):
+                    skipped += 1
+                    continue
+                try:
+                    changed = library.edit_book(
+                        book.book_id,
+                        ai_summary=summary,
+                        ai_author_note=author_note,
+                        ai_tags=ai_tags,
+                    )
+                except (StorageError, ValueError):
+                    skipped += 1
+                    continue
+                if changed:
+                    updated += 1
+                else:
+                    skipped += 1
+        if updated > 0:
+            push_undo(undo_stack, snapshot)
+            print_result("AI enrich", "Updated", f"updated={updated}, skipped={skipped}")
+        else:
+            print_result("AI enrich", "No change", f"skipped={skipped}")
+        return
+
+    print_status("Usage: ai status | ai mode [safe|fast] | ai model <name> | ai recommend [count] | ai enrich [reference|all]", "warn")
+
+
+def interactive_demo(library: Library, data_file: Path) -> tuple[Library, Path]:
+    history: list[str] = []
+    undo_stack: list[dict[str, Any]] = []
+    current_data_file = data_file
+    active_profile = profile_name_from_data_file(current_data_file)
+
     while True:
         try:
-            raw_input_cmd = input(themed(build_prompt(library), "accent", bold=True)).strip()
+            raw_input_cmd = input(themed(build_prompt(library, active_profile), "accent", bold=True)).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             print_status("Goodbye.", "info")
@@ -4725,6 +6138,14 @@ def interactive_demo(library, data_file: Path):
             topic = raw_cmd[3:].strip() if len(raw_cmd) > 3 else ""
             show_man_page(topic)
             continue
+        if cmd.startswith("profile"):
+            library, current_data_file, switched = profile_command_flow(raw_cmd, library, current_data_file)
+            if switched:
+                active_profile = profile_name_from_data_file(current_data_file)
+                undo_stack.clear()
+                print_dashboard(library)
+                print_summary(library)
+            continue
         if cmd == "add":
             add_book_flow(library, undo_stack)
             continue
@@ -4737,6 +6158,9 @@ def interactive_demo(library, data_file: Path):
                 print_status("Item not found. Use ID, ISBN, title, or author.", "warn")
                 continue
             print_book_details(book)
+            continue
+        if cmd == "bulk edit":
+            bulk_edit_command_flow(library, undo_stack)
             continue
         if cmd == "list" or cmd.startswith("list "):
             list_command_flow(raw_cmd, library)
@@ -4757,7 +6181,19 @@ def interactive_demo(library, data_file: Path):
             print_sheet_stats(library)
             continue
         if cmd == "obsidian" or cmd.startswith("obsidian "):
-            obsidian_command_flow(raw_cmd, library, data_file)
+            obsidian_command_flow(raw_cmd, library, current_data_file)
+            continue
+        if cmd == "search" or cmd.startswith("search "):
+            search_command_flow(raw_cmd, library)
+            continue
+        if cmd.startswith("metadata autofill"):
+            metadata_autofill_command_flow(raw_cmd, library, undo_stack)
+            continue
+        if cmd.startswith("dedup"):
+            dedup_command_flow(raw_cmd, library, undo_stack)
+            continue
+        if cmd == "doctor" or cmd.startswith("doctor "):
+            doctor_command_flow(raw_cmd, library, undo_stack)
             continue
         if cmd.startswith("find"):
             parts = cmd.split(maxsplit=1)
@@ -4871,8 +6307,11 @@ def interactive_demo(library, data_file: Path):
         if cmd.startswith("tag"):
             tag_command_flow(cmd, library, undo_stack)
             continue
-        if cmd == "practice":
-            practice_command_flow(library, undo_stack)
+        if cmd == "practice" or cmd.startswith("practice "):
+            practice_extended_command_flow(raw_cmd, library, undo_stack)
+            continue
+        if cmd == "series set" or cmd.startswith("series next"):
+            series_command_flow(raw_cmd, library, undo_stack)
             continue
         if cmd == "rate":
             book = ask_book_reference(library, "Item reference (ID/ISBN/title/author): ")
@@ -5011,23 +6450,38 @@ def interactive_demo(library, data_file: Path):
             else:
                 print_result("Reading list remove", "No change")
             continue
+        if cmd == "reading plan" or cmd.startswith("reading plan "):
+            reading_plan_command_flow(raw_cmd, library)
+            continue
         if cmd.startswith("smart"):
             smart_command_flow(raw_cmd, library, undo_stack)
             continue
         if cmd.startswith("goal"):
             goal_command_flow(cmd, library, undo_stack)
             continue
+        if cmd == "calendar add" or cmd.startswith("calendar "):
+            calendar_command_flow(raw_cmd, library, undo_stack)
+            continue
+        if cmd == "inbox add" or cmd.startswith("inbox "):
+            inbox_command_flow(raw_cmd, library, undo_stack)
+            continue
+        if cmd == "snapshot create" or cmd.startswith("snapshot "):
+            snapshot_command_flow(raw_cmd, library, current_data_file, undo_stack)
+            continue
+        if cmd == "ai status" or cmd.startswith("ai "):
+            ai_command_flow(raw_cmd, library, undo_stack)
+            continue
         if cmd == "stats":
             print_stats(library)
             continue
         if cmd == "backup":
-            backup_flow(library, data_file)
+            backup_flow(library, current_data_file)
             continue
         if cmd == "restore":
-            restore_flow(library, undo_stack, data_file)
+            restore_flow(library, undo_stack, current_data_file)
             continue
         if cmd == "export" or cmd.startswith("export "):
-            export_command_flow(raw_cmd, library, data_file)
+            export_command_flow(raw_cmd, library, current_data_file)
             continue
         if cmd == "import":
             import_flow(library, undo_stack)
@@ -5062,6 +6516,8 @@ def interactive_demo(library, data_file: Path):
         else:
             print_status("Unknown command. Use: help", "warn")
 
+    return library, current_data_file
+
 
 def load_library(data_file: Path) -> Library:
     try:
@@ -5080,7 +6536,9 @@ def main():
     args = parse_cli_args()
     if args.help:
         theme_choices = "|".join(sorted(THEMES.keys()))
-        print(f"Usage: python3 main.py [--no-color] [--theme {theme_choices}] [--compact] [--no-motion]")
+        print(
+            f"Usage: python3 main.py [--no-color] [--theme {theme_choices}] [--compact] [--no-motion] [--profile <name>]"
+        )
         return
     if args.no_color:
         USE_COLOR = False
@@ -5091,7 +6549,8 @@ def main():
     if args.no_motion:
         SHOW_MOTION = False
 
-    data_file = resolve_data_file()
+    requested_profile = _sanitize_profile_name(args.profile) if args.profile else ""
+    data_file = resolve_data_file(requested_profile or None)
     library = load_library(data_file)
 
     print_banner(data_file)
@@ -5103,7 +6562,7 @@ def main():
     except Exception:
         pass
 
-    interactive_demo(library, data_file)
+    library, data_file = interactive_demo(library, data_file)
 
     try:
         library.save()

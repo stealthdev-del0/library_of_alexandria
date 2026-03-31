@@ -1,23 +1,14 @@
-.TH LOA-READING-SMART-APPEND 1 "2026-03-15" "Library Of Alexandria" "User Commands"
+.TH LOA-READING-SMART-APPEND 1 "2026-03-31" "Library Of Alexandria" "User Commands"
 .SH NAME
-reading smart append \- Append smart recommendations to reading list
+reading smart append \- append smart recommendations to reading list
 .SH SYNOPSIS
-alexandria> reading smart append
-.br
-alexandria> reading smart append 5
+alexandria> reading smart append [count]
 .SH DESCRIPTION
-.TP
-Builds recommendation candidates and appends them to the existing reading list.
-.TP
-Already listed books are not duplicated.
-.TP
-Optional count controls how many recommendations are considered (default: 10).
+append smart recommendations to reading list.
 .SH EXAMPLES
 .TP
-alexandria> reading smart append
-.TP
-alexandria> reading smart append 4
+alexandria> reading smart append 5
 .SH SEE ALSO
-loa(1), loa-reading-smart-preview(1), loa-reading-smart-generate(1), loa-reading-list(1)
+loa(1)
 .SH AUTHOR
 Generated for the Library Of Alexandria project.
