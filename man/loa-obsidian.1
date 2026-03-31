@@ -1,0 +1,28 @@
+.TH LOA-OBSIDIAN 1 "2026-03-23" "Library Of Alexandria" "User Commands"
+.SH NAME
+obsidian \- Show Obsidian integration status and usage
+.SH SYNOPSIS
+alexandria> obsidian
+.SH DESCRIPTION
+Displays the currently configured Obsidian vault path (if available) and
+prints the available integration commands.
+.br
+Use this to quickly verify your setup before syncing or opening the vault.
+.br
+After sync, start daily work from \fBAlexandria/Dashboards/GUI Home.md\fR
+and the \fBAlexandria/Bases/*.base\fR views.
+.SH EXAMPLES
+.TP
+alexandria> obsidian
+.TP
+alexandria> obsidian sync
+.TP
+alexandria> obsidian doctor
+.TP
+alexandria> obsidian open
+.TP
+alexandria> obsidian open b0001
+.SH SEE ALSO
+loa(1), loa-export-obsidian(1), loa-obsidian-sync(1), loa-obsidian-doctor(1), loa-obsidian-open(1)
+.SH AUTHOR
+Generated for the Library Of Alexandria project.

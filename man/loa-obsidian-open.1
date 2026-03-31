@@ -1,0 +1,35 @@
+.TH LOA-OBSIDIAN-OPEN 1 "2026-03-23" "Library Of Alexandria" "User Commands"
+.SH NAME
+obsidian open \- Open Obsidian vault or jump to one managed note
+.SH SYNOPSIS
+alexandria> obsidian open
+.br
+alexandria> obsidian open b0001
+.br
+alexandria> obsidian open /path/to/your/vault
+.SH DESCRIPTION
+Launches Obsidian using the configured vault path.
+.br
+If an item reference is provided (ID/ISBN/title/author/composer),
+Alexandria resolves the item and opens its note via \fBobsidian://\fR URI.
+.br
+If a filesystem path is provided, that path is treated as the vault path.
+.br
+The Alexandria CLI stays running after opening.
+.br
+If no vault path is configured, set one with:
+.br
+\fBexport obsidian <vault_path>\fR
+.SH EXAMPLES
+.TP
+alexandria> obsidian open
+.TP
+alexandria> obsidian open b0001
+.TP
+alexandria> obsidian open "Das Kapital"
+.TP
+alexandria> obsidian open ~/Documents/MyVault
+.SH SEE ALSO
+loa(1), loa-export-obsidian(1), loa-obsidian-sync(1), loa-obsidian-doctor(1)
+.SH AUTHOR
+Generated for the Library Of Alexandria project.

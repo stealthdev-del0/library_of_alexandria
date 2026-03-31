@@ -1,0 +1,25 @@
+.TH LOA-MAN 1 "2026-03-15" "Library Of Alexandria" "User Commands"
+.SH NAME
+man \- Show bundled command manual pages from inside alexandria
+.SH SYNOPSIS
+alexandria> man add
+.br
+alexandria> man reading add
+.SH DESCRIPTION
+.TP
+Requires an exact command name.
+.TP
+Opens the matching bundled page (for example \fBloa-add.1\fR).
+.TP
+If the system \fBman\fR command is available, pages are rendered normally.
+.TP
+If \fBman\fR is unavailable, a plain text fallback is shown.
+.SH EXAMPLES
+.TP
+alexandria> man progress
+.TP
+alexandria> man reading remove
+.SH SEE ALSO
+loa(1)
+.SH AUTHOR
+Generated for the Library Of Alexandria project.

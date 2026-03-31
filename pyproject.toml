@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "library-of-alexandria-cli"
+version = "0.1.0"
+description = "Terminal reading and book tracker"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+alexandria = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "system"]

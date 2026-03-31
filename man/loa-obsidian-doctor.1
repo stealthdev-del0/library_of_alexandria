@@ -1,0 +1,29 @@
+.TH LOA-OBSIDIAN-DOCTOR 1 "2026-03-23" "Library Of Alexandria" "User Commands"
+.SH NAME
+obsidian doctor \- Validate Obsidian vault setup for Alexandria sync
+.SH SYNOPSIS
+alexandria> obsidian doctor
+.br
+alexandria> obsidian doctor /path/to/your/vault
+.SH DESCRIPTION
+Runs environment checks for an Obsidian vault:
+.br
+\fB- vault path\fR (exists and is a directory)
+.br
+\fB- write access\fR (probe file write/delete)
+.br
+\fB- required folders\fR (Alexandria managed folders including Bases/Templates)
+.br
+\fB- required GUI files\fR (GUI Home, Saved Searches, Bookmarks, Genres MOC,
+base files, templates/bookmarks config)
+.br
+Use this before first sync or when sync/open behavior looks wrong.
+.SH EXAMPLES
+.TP
+alexandria> obsidian doctor
+.TP
+alexandria> obsidian doctor ~/Documents/MyVault
+.SH SEE ALSO
+loa(1), loa-export-obsidian(1), loa-obsidian(1), loa-obsidian-sync(1), loa-obsidian-open(1)
+.SH AUTHOR
+Generated for the Library Of Alexandria project.

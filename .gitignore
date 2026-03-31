@@ -1,3 +1,7 @@
 __pycache__/
 *.py[cod]
 *.pyo
+library_data.json
+.DS_Store
+.alexandria_obsidian_vault_path
+Obsidian_Vault_Alexandria/
