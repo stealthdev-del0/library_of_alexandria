@@ -21,6 +21,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from gui_server import AlexandriaGUIServer, SharedRuntime
 from system import (
     ALLOWED_COVERS,
     ALLOWED_ITEM_TYPES,
@@ -377,6 +378,10 @@ def parse_cli_args():
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--no-motion", action="store_true")
     parser.add_argument("--profile", type=str, default="")
+    parser.add_argument("--no-gui-server", action="store_true")
+    parser.add_argument("--gui-port", type=int, default=8765)
+    parser.add_argument("--gui-host", type=str, default="127.0.0.1")
+    parser.add_argument("--open-gui", action="store_true")
     parser.add_argument("--help", action="store_true")
     args, _unknown = parser.parse_known_args()
     return args
@@ -6153,7 +6158,11 @@ def ai_command_flow(raw_cmd: str, library: Library, undo_stack) -> None:
     print_status("Usage: ai status | ai mode [safe|fast] | ai model <name> | ai recommend [count] | ai enrich [reference|all]", "warn")
 
 
-def interactive_demo(library: Library, data_file: Path) -> tuple[Library, Path]:
+def interactive_demo(
+    library: Library,
+    data_file: Path,
+    runtime: SharedRuntime | None = None,
+) -> tuple[Library, Path]:
     history: list[str] = []
     undo_stack: list[dict[str, Any]] = []
     current_data_file = data_file
@@ -6190,6 +6199,9 @@ def interactive_demo(library: Library, data_file: Path) -> tuple[Library, Path]:
             if switched:
                 active_profile = profile_name_from_data_file(current_data_file)
                 undo_stack.clear()
+                if runtime is not None:
+                    runtime.library = library
+                    runtime.data_file = current_data_file
                 print_dashboard(library)
                 print_summary(library)
             continue
@@ -6584,7 +6596,9 @@ def main():
     if args.help:
         theme_choices = "|".join(sorted(THEMES.keys()))
         print(
-            f"Usage: python3 main.py [--no-color] [--theme {theme_choices}] [--compact] [--no-motion] [--profile <name>]"
+            "Usage: python3 main.py "
+            f"[--no-color] [--theme {theme_choices}] [--compact] [--no-motion] [--profile <name>] "
+            "[--no-gui-server] [--gui-host <host>] [--gui-port <port>] [--open-gui]"
         )
         return
     if args.no_color:
@@ -6599,22 +6613,41 @@ def main():
     requested_profile = _sanitize_profile_name(args.profile) if args.profile else ""
     data_file = resolve_data_file(requested_profile or None)
     library = load_library(data_file)
+    runtime = SharedRuntime(library=library, data_file=data_file)
+    gui_server: AlexandriaGUIServer | None = None
 
     print_banner(data_file)
     print_dashboard(library)
     print_summary(library)
+    if not args.no_gui_server:
+        try:
+            gui_server = AlexandriaGUIServer(runtime=runtime, host=args.gui_host, port=max(0, args.gui_port))
+            host, port = gui_server.start()
+            print_status(f"GUI available at http://{host}:{port}", "ok")
+            if args.open_gui:
+                try:
+                    webbrowser.open(f"http://{host}:{port}", new=2)
+                except Exception:
+                    pass
+        except OSError as exc:
+            print_status(f"GUI server could not start: {exc}", "warn")
 
     try:
         setup_autocomplete()
     except Exception:
         pass
 
-    library, data_file = interactive_demo(library, data_file)
+    library, data_file = interactive_demo(library, data_file, runtime=runtime)
+    runtime.library = library
+    runtime.data_file = data_file
 
     try:
         library.save()
     except StorageError as exc:
         print_status(f"Final save failed: {exc}", "error")
+    finally:
+        if gui_server is not None:
+            gui_server.stop()
 
 
 if __name__ == "__main__":

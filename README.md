@@ -9,6 +9,7 @@ A terminal-first personal library tracker with:
 - goals, stats, import/export, backup/restore, and undo
 - Obsidian vault export/sync/open integration with a Bases-first GUI, dashboards, MOCs, saved searches, bookmarks, and templates
 - on-demand command help (clean startup, no command wall)
+- a local modern web GUI running alongside CLI (`http://127.0.0.1:8765` by default)
 
 ## Run
 
@@ -16,12 +17,28 @@ A terminal-first personal library tracker with:
 python3 main.py
 ```
 
+This starts:
+- the CLI (as before)
+- a local GUI server (default: `http://127.0.0.1:8765`)
+
+Use either interface, both work on the same data file.
+
 Optional UI flags:
 
 ```bash
 python3 main.py --theme ocean --compact
 python3 main.py --no-color --no-motion
+python3 main.py --open-gui
+python3 main.py --gui-port 9000
+python3 main.py --no-gui-server
 ```
+
+GUI includes:
+- fast list/detail/edit flow
+- ISBN auto-completion on add/edit
+- filterable interactive graph view (pan/zoom/drag/click nodes)
+- built-in command console in the GUI (CLI-style commands, aliases, command history)
+- doctor/dedup/recommend/reading-plan tool panels
 
 ## Install System-Wide (User Install)
 

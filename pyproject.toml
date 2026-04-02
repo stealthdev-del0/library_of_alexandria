@@ -14,4 +14,4 @@ dependencies = []
 alexandria = "main:main"
 
 [tool.setuptools]
-py-modules = ["main", "system"]
+py-modules = ["main", "system", "gui_server"]
