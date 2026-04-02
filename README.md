@@ -37,7 +37,7 @@ GUI includes:
 - fast list/detail/edit flow
 - ISBN auto-completion on add/edit
 - filterable interactive graph view (pan/zoom/drag/click nodes)
-- built-in command console in the GUI (CLI-style commands, aliases, command history)
+- built-in command console in the GUI (extended CLI-style commands, aliases, command history, multi-word commands like `mark read`, `reading list`, `tag add`)
 - doctor/dedup/recommend/reading-plan tool panels
 
 ## Install System-Wide (User Install)

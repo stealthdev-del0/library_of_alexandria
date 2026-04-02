@@ -321,6 +321,12 @@ class AlexandriaGUIServer:
             def _book_from_reference(self, reference: str) -> Book | None:
                 return self._library().get_by_reference(reference)
 
+            def _book_payload(self, book: Book) -> dict[str, Any]:
+                payload = book_to_api_dict(book)
+                reading_set = {item.casefold() for item in self._library().reading_list}
+                payload["in_reading_list"] = bool(book.book_id) and book.book_id.casefold() in reading_set
+                return payload
+
             def do_GET(self) -> None:
                 parsed = urlparse(self.path)
                 path = parsed.path
@@ -353,7 +359,7 @@ class AlexandriaGUIServer:
                         tag=(query.get("tag") or [""])[0],
                         location=(query.get("location") or [""])[0],
                     )
-                    self._send_json({"items": [book_to_api_dict(item) for item in filtered]})
+                    self._send_json({"items": [self._book_payload(item) for item in filtered]})
                     return
 
                 if path.startswith("/api/books/"):
@@ -365,7 +371,7 @@ class AlexandriaGUIServer:
                     if not book:
                         self._send_json({"error": "Book not found"}, status=404)
                         return
-                    self._send_json({"item": book_to_api_dict(book)})
+                    self._send_json({"item": self._book_payload(book)})
                     return
 
                 if path == "/api/graph":
@@ -409,7 +415,7 @@ class AlexandriaGUIServer:
                     recommendations = self._library().recommend_books_with_reasons(limit=max(1, count))
                     payload = [
                         {
-                            "item": book_to_api_dict(entry["book"]),
+                            "item": self._book_payload(entry["book"]),
                             "score": entry["score"],
                             "reasons": entry["reasons"],
                         }
@@ -434,7 +440,7 @@ class AlexandriaGUIServer:
                 if path == "/api/series-next":
                     name = (query.get("name") or [""])[0]
                     items = self._library().next_in_series(name or None)
-                    self._send_json({"items": [book_to_api_dict(item) for item in items]})
+                    self._send_json({"items": [self._book_payload(item) for item in items]})
                     return
 
                 self._send_json({"error": "Not found"}, status=404)
@@ -487,7 +493,7 @@ class AlexandriaGUIServer:
                     if not changed:
                         self._send_json({"error": "duplicate item"}, status=409)
                         return
-                    self._send_json({"item": book_to_api_dict(book)}, status=201)
+                    self._send_json({"item": self._book_payload(book)}, status=201)
                     return
 
                 if path == "/api/books/isbn-autofill":
@@ -514,7 +520,7 @@ class AlexandriaGUIServer:
                         self._send_json({"error": "No change"}, status=409)
                         return
                     book = self._book_from_reference(reference)
-                    self._send_json({"item": book_to_api_dict(book)} if book else {"ok": True})
+                    self._send_json({"item": self._book_payload(book)} if book else {"ok": True})
                     return
 
                 if path.startswith("/api/books/") and path.endswith("/reading-list"):
@@ -619,7 +625,7 @@ class AlexandriaGUIServer:
                     if not item:
                         self._send_json({"ok": True})
                         return
-                    self._send_json({"item": book_to_api_dict(item)})
+                    self._send_json({"item": self._book_payload(item)})
                     return
                 self._send_json({"error": "Not found"}, status=404)
 
@@ -947,6 +953,7 @@ GUI_HTML = """<!doctype html>
       white-space:pre-wrap;
     }
     .console-line.ok{color:#9ef8c9}
+    .console-line.warn{color:#f2cc60}
     .console-line.err{color:#ffaca7}
     .console-line.muted{color:#94a6d6}
     .console-input{
@@ -1207,8 +1214,12 @@ GUI_HTML = """<!doctype html>
       consoleHistory: [],
       consoleHistoryIndex: -1,
       kindFilters: new Set(["item", "creator", "genre", "tag", "language", "location"]),
+      extraFilters: { genre: "", tag: "", location: "" },
     };
     const $ = (id) => document.getElementById(id);
+    const ALLOWED_LANGUAGES = ["German", "English", "French", "Japanese"];
+    const ALLOWED_COVERS = ["Hardcover", "Softcover"];
+    const ALLOWED_LOCATIONS = ["Pforta", "Zuhause"];
 
     function esc(v){
       return String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -1252,6 +1263,16 @@ GUI_HTML = """<!doctype html>
       if(!raw){ return null; }
       const n = parseInt(raw, 10);
       return Number.isFinite(n) ? n : null;
+    }
+
+    function normalizeChoice(value, choices){
+      const token = String(value || "").trim().toLowerCase();
+      if(!token){ return null; }
+      return choices.find((item) => item.toLowerCase() === token) || null;
+    }
+
+    function clearExtraFilters(){
+      state.extraFilters = { genre: "", tag: "", location: "" };
     }
 
     function toPayloadFromForm(){
@@ -1359,6 +1380,9 @@ GUI_HTML = """<!doctype html>
       if(quickType){ p.set("item_type", quickType); }
       const quickLang = $("quickLang").value;
       if(quickLang){ p.set("language", quickLang); }
+      if(state.extraFilters.genre){ p.set("genre", state.extraFilters.genre); }
+      if(state.extraFilters.tag){ p.set("tag", state.extraFilters.tag); }
+      if(state.extraFilters.location){ p.set("location", state.extraFilters.location); }
       return p.toString();
     }
 
@@ -1946,6 +1970,82 @@ GUI_HTML = """<!doctype html>
       return fuzzy ? fuzzy.book_id : null;
     }
 
+    function resolveReferenceAndRest(args, requireRest=false){
+      for(let i = args.length; i >= 1; i--){
+        const maybeRef = resolveReference(args.slice(0, i).join(" "));
+        if(!maybeRef){ continue; }
+        const rest = args.slice(i);
+        if(requireRest && rest.length === 0){ continue; }
+        return { ref: maybeRef, rest };
+      }
+      return null;
+    }
+
+    function parseTagTokens(text){
+      return String(text || "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
+    }
+
+    function setListPreset(preset, value=""){
+      if(preset === "all"){
+        $("quickRead").value = "all";
+        $("quickType").value = "";
+        $("quickLang").value = "";
+        clearExtraFilters();
+        return;
+      }
+      if(preset === "read"){
+        $("quickRead").value = "read";
+        return;
+      }
+      if(preset === "unread"){
+        $("quickRead").value = "unread";
+        return;
+      }
+      if(preset === "sheet"){
+        $("quickType").value = "SheetMusic";
+        return;
+      }
+      if(preset === "book"){
+        $("quickType").value = "Book";
+        return;
+      }
+      if(preset === "language"){
+        const lang = normalizeChoice(value, ALLOWED_LANGUAGES);
+        if(!lang){ throw new Error("Invalid language. Use: German | English | French | Japanese"); }
+        $("quickLang").value = lang;
+        return;
+      }
+      if(preset === "genre"){
+        state.extraFilters.genre = value;
+        return;
+      }
+      if(preset === "tag"){
+        state.extraFilters.tag = value.toLowerCase();
+        return;
+      }
+      if(preset === "location"){
+        const location = normalizeChoice(value, ALLOWED_LOCATIONS);
+        if(!location){ throw new Error("Invalid location. Use: Pforta | Zuhause"); }
+        state.extraFilters.location = location;
+        return;
+      }
+    }
+
+    async function setReadByReference(reference, readFlag){
+      await api("/api/books/" + encodeURIComponent(reference) + "/read", { method:"POST", body: JSON.stringify({read: !!readFlag}) });
+      await loadBooks();
+      if(state.selectedId === reference){ await loadDetails(reference); }
+    }
+
+    async function updateBookByReference(reference, payload){
+      await api("/api/books/" + encodeURIComponent(reference), { method:"PUT", body: JSON.stringify(payload) });
+      await loadBooks();
+      if(state.selectedId === reference){ await loadDetails(reference); }
+    }
+
     function openConsole(open=true){
       $("consoleShell").classList.toggle("open", !!open);
       if(open){
@@ -1963,7 +2063,10 @@ GUI_HTML = """<!doctype html>
       const tokens = tokenize(cmdline);
       if(!tokens.length){ return; }
       const cmd = tokens[0].toLowerCase();
+      const cmd2 = `${cmd} ${(tokens[1] || "").toLowerCase()}`.trim();
+      const cmd3 = `${cmd2} ${(tokens[2] || "").toLowerCase()}`.trim();
       const args = tokens.slice(1);
+      const args2 = tokens.slice(2);
 
       try {
         if(cmd === "clear"){
@@ -1975,40 +2078,111 @@ GUI_HTML = """<!doctype html>
           return;
         }
         if(cmd === "help" || cmd === "man"){
-          logConsole("Commands: help, ls/list, search <query>, details <ref>, add key=value..., update <ref> key=value..., rm/remove <ref>, read <ref>, unread <ref>, location <ref> <Pforta|Zuhause>, reading add|remove <ref>, graph [key=value], clear, q", "ok");
-          logConsole("Aliases: ls, rm, q", "muted");
+          const topic = args.join(" ").trim().toLowerCase();
+          const topicMap = {
+            "list": "list, list read, list unread, list sheet, list language <Language>, list genre <Genre>, list tag <Tag>, list location <Pforta|Zuhause>",
+            "reading": "reading add <ref>, reading remove <ref>, reading list, reading plan [minutes] [weeks]",
+            "tag": "tag add <ref> <tags>, tag remove <ref> <tags>, tag set <ref> <tags>, tag clear <ref>",
+            "update": "update <ref> key=value..., language <ref> <Language>, cover <ref> <Hardcover|Softcover>, location <ref> <Pforta|Zuhause>, progress <ref> <page>, rate <ref> <1-5|clear>, notes <ref> <text>",
+            "graph": "graph [query=...] [type=Book|SheetMusic] [read=all|read|unread] [language=...] [genre=...] [tag=...] [location=...]",
+            "tools": "doctor [fix], dedup scan [threshold], recommend [count], stats, use library|graph|tools",
+          };
+          if(topic && topicMap[topic]){
+            logConsole(topicMap[topic], "ok");
+          } else {
+            logConsole("Commands: help/man [topic], ls/list, search/find <query>, details/check/open <ref>, add key=value..., update <ref> key=value...", "ok");
+            logConsole("More: mark read|unread <ref>, read/unread <ref>, remove/rm/delete <ref>, progress, rate, notes, language, cover, location, tag ...", "ok");
+            logConsole("Reading + tools: reading add/remove/list/plan, doctor [fix], dedup scan [threshold], recommend [count], graph, stats, use <tab>, clear, q", "ok");
+          }
+          logConsole("Aliases: ls, rm, del, q, mr, mu", "muted");
+          return;
+        }
+        if(cmd === "refresh"){
+          await loadBooks();
+          logConsole(`Refreshed ${state.items.length} item(s).`, "ok");
           return;
         }
         if(cmd === "ls" || cmd === "list"){
-          if(args.length){
-            $("searchInput").value = args.join(" ");
+          if(args.length === 0){
+            await loadBooks();
+            logConsole(`Listed ${state.items.length} item(s).`, "ok");
+            return;
           }
+          if(cmd2 === "list full"){
+            $("searchInput").value = "";
+            setListPreset("all");
+            await loadBooks();
+            logConsole(`Listed ${state.items.length} item(s) with full reset.`, "ok");
+            return;
+          }
+          if(cmd2 === "list read" || cmd2 === "list unread" || cmd2 === "list sheet"){
+            if(cmd2 === "list read") setListPreset("read");
+            if(cmd2 === "list unread") setListPreset("unread");
+            if(cmd2 === "list sheet") setListPreset("sheet");
+            await loadBooks();
+            logConsole(`Listed ${state.items.length} item(s).`, "ok");
+            return;
+          }
+          if(cmd2 === "list language"){
+            if(args2.length === 0){ throw new Error("Usage: list language <German|English|French|Japanese>"); }
+            setListPreset("language", args2.join(" "));
+            await loadBooks();
+            logConsole(`Listed ${state.items.length} item(s) in ${$("quickLang").value}.`, "ok");
+            return;
+          }
+          if(cmd2 === "list genre"){
+            if(args2.length === 0){ throw new Error("Usage: list genre <name>"); }
+            setListPreset("genre", args2.join(" "));
+            await loadBooks();
+            logConsole(`Listed ${state.items.length} item(s) for genre '${state.extraFilters.genre}'.`, "ok");
+            return;
+          }
+          if(cmd2 === "list tag"){
+            if(args2.length === 0){ throw new Error("Usage: list tag <name>"); }
+            setListPreset("tag", args2.join(" "));
+            await loadBooks();
+            logConsole(`Listed ${state.items.length} item(s) for tag '${state.extraFilters.tag}'.`, "ok");
+            return;
+          }
+          if(cmd2 === "list location"){
+            if(args2.length === 0){ throw new Error("Usage: list location <Pforta|Zuhause>"); }
+            setListPreset("location", args2.join(" "));
+            await loadBooks();
+            logConsole(`Listed ${state.items.length} item(s) at ${state.extraFilters.location}.`, "ok");
+            return;
+          }
+          $("searchInput").value = args.join(" ");
           await loadBooks();
           logConsole(`Listed ${state.items.length} item(s).`, "ok");
           return;
         }
-        if(cmd === "search"){
-          $("searchInput").value = args.join(" ");
+        if(cmd === "search" || cmd === "find"){
+          if(cmd2 === "find title" || cmd2 === "find author" || cmd2 === "find composer" || cmd2 === "find notes"){
+            $("searchInput").value = args2.join(" ");
+          } else {
+            $("searchInput").value = args.join(" ");
+          }
           await loadBooks();
           logConsole(`Search returned ${state.items.length} item(s).`, "ok");
           return;
         }
-        if(cmd === "details" || cmd === "open"){
-          const ref = resolveReference(args.join(" "));
+        if(cmd === "details" || cmd === "open" || cmd === "check"){
+          const ref = args.length ? resolveReference(args.join(" ")) : state.selectedId;
           if(!ref){ throw new Error("Item not found."); }
           await selectItem(ref);
           logConsole(`Opened details: ${ref}`, "ok");
           return;
         }
-        if(cmd === "read" || cmd === "unread"){
-          const ref = resolveReference(args.join(" "));
+        if(cmd === "read" || cmd === "unread" || cmd === "mr" || cmd === "mu" || cmd2 === "mark read" || cmd2 === "mark unread"){
+          const readMode = cmd === "read" || cmd === "mr" || cmd2 === "mark read";
+          const refArgs = (cmd2 === "mark read" || cmd2 === "mark unread") ? args2 : args;
+          const ref = resolveReference(refArgs.join(" "));
           if(!ref){ throw new Error("Item not found."); }
-          await api("/api/books/" + encodeURIComponent(ref) + "/read", { method:"POST", body: JSON.stringify({read: cmd === "read"}) });
-          await loadBooks();
-          logConsole(cmd === "read" ? `Updated: ${ref} marked read.` : `Updated: ${ref} marked unread.`, "ok");
+          await setReadByReference(ref, readMode);
+          logConsole(readMode ? `Updated: ${ref} marked read.` : `Updated: ${ref} marked unread.`, "ok");
           return;
         }
-        if(cmd === "rm" || cmd === "remove"){
+        if(cmd === "rm" || cmd === "remove" || cmd === "delete" || cmd === "del"){
           const ref = resolveReference(args.join(" "));
           if(!ref){ throw new Error("Item not found."); }
           await api("/api/books/" + encodeURIComponent(ref), { method:"DELETE" });
@@ -2018,26 +2192,195 @@ GUI_HTML = """<!doctype html>
           logConsole(`Removed: ${ref}`, "ok");
           return;
         }
+        if(cmd === "progress"){
+          const parsed = resolveReferenceAndRest(args, true);
+          if(!parsed){ throw new Error("Usage: progress <ref> <pages>"); }
+          const pageValue = parseIntOrNull(parsed.rest.join(" "));
+          if(pageValue === null || pageValue < 0){ throw new Error("Invalid progress. Use a non-negative number."); }
+          await updateBookByReference(parsed.ref, { progress_pages: pageValue });
+          logConsole(`Updated: ${parsed.ref} progress=${pageValue}`, "ok");
+          return;
+        }
+        if(cmd === "rate"){
+          const parsed = resolveReferenceAndRest(args, true);
+          if(!parsed){ throw new Error("Usage: rate <ref> <1-5|clear>"); }
+          const rawValue = parsed.rest.join(" ").trim().toLowerCase();
+          let ratingValue = null;
+          if(rawValue !== "clear" && rawValue !== "-"){
+            ratingValue = parseIntOrNull(rawValue);
+            if(ratingValue === null || ratingValue < 1 || ratingValue > 5){
+              throw new Error("Invalid rating. Use: 1..5 or clear");
+            }
+          }
+          await updateBookByReference(parsed.ref, { rating: ratingValue });
+          logConsole(`Updated: ${parsed.ref} rating=${ratingValue === null ? "-" : ratingValue}`, "ok");
+          return;
+        }
+        if(cmd === "notes"){
+          const parsed = resolveReferenceAndRest(args, true);
+          if(!parsed){ throw new Error("Usage: notes <ref> <text>"); }
+          const text = parsed.rest.join(" ").trim();
+          await updateBookByReference(parsed.ref, { notes: text });
+          logConsole(`Updated: ${parsed.ref} notes`, "ok");
+          return;
+        }
+        if(cmd === "language"){
+          const parsed = resolveReferenceAndRest(args, true);
+          if(!parsed){ throw new Error("Usage: language <ref> <German|English|French|Japanese>"); }
+          const value = normalizeChoice(parsed.rest.join(" "), ALLOWED_LANGUAGES);
+          if(!value){ throw new Error("Invalid language. Use: German | English | French | Japanese"); }
+          await updateBookByReference(parsed.ref, { language: value });
+          logConsole(`Updated: ${parsed.ref} language=${value}`, "ok");
+          return;
+        }
+        if(cmd === "cover"){
+          const parsed = resolveReferenceAndRest(args, true);
+          if(!parsed){ throw new Error("Usage: cover <ref> <Hardcover|Softcover>"); }
+          const value = normalizeChoice(parsed.rest.join(" "), ALLOWED_COVERS);
+          if(!value){ throw new Error("Invalid cover. Use: Hardcover | Softcover"); }
+          await updateBookByReference(parsed.ref, { cover: value });
+          logConsole(`Updated: ${parsed.ref} cover=${value}`, "ok");
+          return;
+        }
         if(cmd === "location"){
-          if(args.length < 2){ throw new Error("Usage: location <ref> <Pforta|Zuhause>"); }
-          const ref = resolveReference(args[0]);
-          if(!ref){ throw new Error("Item not found."); }
-          const value = args[1];
-          if(!["Pforta", "Zuhause"].includes(value)){ throw new Error("Invalid location. Use: Pforta | Zuhause"); }
-          await api("/api/books/" + encodeURIComponent(ref), { method:"PUT", body: JSON.stringify({location:value}) });
-          await loadBooks();
-          if(state.selectedId === ref){ await loadDetails(ref); }
-          logConsole(`Updated: ${ref} location=${value}`, "ok");
+          const parsed = resolveReferenceAndRest(args, true);
+          if(!parsed){ throw new Error("Usage: location <ref> <Pforta|Zuhause>"); }
+          const value = normalizeChoice(parsed.rest.join(" "), ALLOWED_LOCATIONS);
+          if(!value){ throw new Error("Invalid location. Use: Pforta | Zuhause"); }
+          await updateBookByReference(parsed.ref, { location: value });
+          logConsole(`Updated: ${parsed.ref} location=${value}`, "ok");
+          return;
+        }
+        if(cmd === "tag"){
+          if(args.length < 1){ throw new Error("Usage: tag add|remove|set|clear <ref> [tags]"); }
+          const mode = args[0].toLowerCase();
+          if(mode === "clear"){
+            const ref = resolveReference(args.slice(1).join(" "));
+            if(!ref){ throw new Error("Item not found."); }
+            await updateBookByReference(ref, { tags: [] });
+            logConsole(`Updated: ${ref} tags cleared.`, "ok");
+            return;
+          }
+          if(!["add", "remove", "set"].includes(mode)){
+            throw new Error("Usage: tag add|remove|set|clear <ref> [tags]");
+          }
+          const parsed = resolveReferenceAndRest(args.slice(1), true);
+          if(!parsed){ throw new Error("Usage: tag add|remove|set <ref> <tag1, tag2>"); }
+          const tagsRaw = parseTagTokens(parsed.rest.join(" "));
+          if(tagsRaw.length === 0){ throw new Error("Provide at least one tag."); }
+          if(mode === "set"){
+            await updateBookByReference(parsed.ref, { tags: tagsRaw });
+            logConsole(`Updated: ${parsed.ref} tags set.`, "ok");
+            return;
+          }
+          const details = await api("/api/books/" + encodeURIComponent(parsed.ref));
+          const current = Array.isArray(details.item?.tags) ? details.item.tags.slice() : [];
+          let nextTags = current.slice();
+          if(mode === "add"){
+            const seen = new Set(nextTags.map((x) => String(x).toLowerCase()));
+            for(const tag of tagsRaw){
+              const key = String(tag).toLowerCase();
+              if(!seen.has(key)){
+                seen.add(key);
+                nextTags.push(tag);
+              }
+            }
+          } else {
+            const removeSet = new Set(tagsRaw.map((x) => String(x).toLowerCase()));
+            nextTags = nextTags.filter((x) => !removeSet.has(String(x).toLowerCase()));
+          }
+          await updateBookByReference(parsed.ref, { tags: nextTags });
+          logConsole(`Updated: ${parsed.ref} tags ${mode}ed.`, "ok");
           return;
         }
         if(cmd === "reading"){
-          if(args.length < 2){ throw new Error("Usage: reading add|remove <ref>"); }
+          if(args.length < 1){ throw new Error("Usage: reading add|remove|list|plan ..."); }
           const action = args[0].toLowerCase();
-          if(action !== "add" && action !== "remove"){ throw new Error("Usage: reading add|remove <ref>"); }
+          if(action === "list"){
+            const data = await api("/api/books");
+            const readingItems = (data.items || []).filter((item) => item.in_reading_list);
+            if(readingItems.length === 0){
+              logConsole("Reading list is empty. Try: reading add <ref>", "muted");
+            } else {
+              logConsole(`Reading list (${readingItems.length}):`, "ok");
+              for(const item of readingItems.slice(0, 40)){
+                logConsole(`- ${item.book_id} | ${item.title} | ${item.display_creator || item.author}`, "muted");
+              }
+            }
+            return;
+          }
+          if(action === "plan"){
+            const minutes = parseIntOrNull(args[1] || "120") ?? 120;
+            const weeks = parseIntOrNull(args[2] || "4") ?? 4;
+            const plan = await api(`/api/reading-plan?minutes=${encodeURIComponent(String(minutes))}&weeks=${encodeURIComponent(String(weeks))}`);
+            const summary = plan.plan?.summary || {};
+            logConsole(`Reading plan: ${summary.weeks || weeks} week(s), ${summary.minutes_per_week || minutes} min/week, ${(summary.total_candidates || 0)} candidate(s).`, "ok");
+            return;
+          }
+          if(action !== "add" && action !== "remove"){ throw new Error("Usage: reading add|remove|list|plan ..."); }
           const ref = resolveReference(args.slice(1).join(" "));
           if(!ref){ throw new Error("Item not found."); }
           await api("/api/books/" + encodeURIComponent(ref) + "/reading-list", { method:"POST", body: JSON.stringify({action}) });
+          await loadBooks();
+          if(state.selectedId === ref){ await loadDetails(ref); }
           logConsole(action === "add" ? `Updated: ${ref} reading+.` : `Updated: ${ref} reading-.`, "ok");
+          return;
+        }
+        if(cmd === "doctor"){
+          const fix = args[0] && ["1", "true", "yes", "fix"].includes(args[0].toLowerCase());
+          const payload = await api("/api/doctor?fix=" + (fix ? "1" : "0"));
+          const report = payload.report || {};
+          logConsole(`Doctor: scanned=${report.scanned ?? "-"} issues=${report.issues ?? "-"} fixed=${report.fixed ?? "-"}${fix ? " (fix mode)" : ""}`, "ok");
+          return;
+        }
+        if(cmd2 === "dedup scan" || cmd === "dedup"){
+          const thresholdRaw = (cmd2 === "dedup scan" ? args2[0] : args[0]) || "0.88";
+          const payload = await api("/api/dedup?threshold=" + encodeURIComponent(thresholdRaw));
+          const findings = payload.findings || [];
+          logConsole(`Dedup: ${findings.length} potential match(es).`, "ok");
+          for(const item of findings.slice(0, 12)){
+            logConsole(`- ${item.left_id} <-> ${item.right_id} score=${item.score}`, "muted");
+          }
+          return;
+        }
+        if(cmd === "recommend"){
+          const count = parseIntOrNull(args[0] || "10") ?? 10;
+          const payload = await api("/api/recommend?count=" + encodeURIComponent(String(count)));
+          const recs = payload.recommendations || [];
+          logConsole(`Recommendations: ${recs.length}`, "ok");
+          for(const entry of recs.slice(0, 10)){
+            logConsole(`- ${entry.item.book_id} | ${entry.item.title} | score=${entry.score}`, "muted");
+          }
+          return;
+        }
+        if(cmd === "stats" || cmd === "status"){
+          const payload = await api("/api/status");
+          const stats = payload.stats || {};
+          logConsole(`Stats: total=${stats.total ?? "-"} unread=${stats.unread ?? "-"} reading_list=${stats.reading_list ?? "-"} goals=${stats.goals_active ?? "-"}`, "ok");
+          return;
+        }
+        if(cmd === "use"){
+          const target = (args[0] || "").toLowerCase();
+          if(target === "library" || target === "list"){ tab("Library"); logConsole("Switched to Library tab.", "ok"); return; }
+          if(target === "graph"){ tab("Graph"); await loadGraph(); logConsole("Switched to Graph tab.", "ok"); return; }
+          if(target === "tools"){ tab("Tools"); logConsole("Switched to Tools tab.", "ok"); return; }
+          throw new Error("Usage: use library|graph|tools");
+        }
+        if(cmd === "isbn"){
+          const isbn = args.join(" ").trim();
+          if(!isbn){ throw new Error("Usage: isbn <number>"); }
+          const data = await api("/api/books/isbn-autofill", { method:"POST", body: JSON.stringify({ isbn }) });
+          const m = data.metadata || {};
+          if(m.title) $("fTitle").value = m.title;
+          if(m.author) $("fAuthor").value = m.author;
+          if(m.year) $("fYear").value = String(m.year);
+          if(m.pages) $("fPages").value = String(m.pages);
+          if(m.genre) $("fGenre").value = m.genre;
+          if(Array.isArray(m.tags) && m.tags.length) $("fTags").value = m.tags.join(", ");
+          if(m.language) $("fLanguage").value = m.language;
+          if(m.cover) $("fCover").value = m.cover;
+          $("fIsbn").value = m.isbn || isbn;
+          logConsole("ISBN metadata loaded into form.", "ok");
           return;
         }
         if(cmd === "add"){
@@ -2066,9 +2409,11 @@ GUI_HTML = """<!doctype html>
         }
         if(cmd === "update"){
           if(args.length < 2){ throw new Error("Usage: update <ref> key=value ..."); }
-          const ref = resolveReference(args[0]);
+          const kvStart = args.findIndex((token) => token.includes("="));
+          if(kvStart <= 0){ throw new Error("Usage: update <ref> key=value ..."); }
+          const ref = resolveReference(args.slice(0, kvStart).join(" "));
           if(!ref){ throw new Error("Item not found."); }
-          const kv = parseKV(args.slice(1));
+          const kv = parseKV(args.slice(kvStart));
           const payload = {};
           for(const [k, v] of Object.entries(kv)){
             if(["year", "pages", "rating", "progress_pages", "progress"].includes(k)){
@@ -2101,6 +2446,14 @@ GUI_HTML = """<!doctype html>
           tab("Graph");
           await loadGraph();
           logConsole("Graph refreshed.", "ok");
+          return;
+        }
+        if(cmd3 === "reading smart preview" || cmd3 === "reading smart generate" || cmd3 === "reading smart append"){
+          logConsole("This smart reading command is CLI-only right now. Use CLI, then refresh GUI.", "warn");
+          return;
+        }
+        if(cmd === "theme" || cmd === "compact"){
+          logConsole("Theme/compact are currently CLI-only controls.", "warn");
           return;
         }
         throw new Error("Unknown command. Try: help");

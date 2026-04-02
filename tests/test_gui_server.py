@@ -75,6 +75,9 @@ class GUIServerHelperTests(unittest.TestCase):
         self.assertIn("console-shell", GUI_HTML)
         self.assertIn("bindGraphInput", GUI_HTML)
         self.assertIn("graphPauseBtn", GUI_HTML)
+        self.assertIn("mark read", GUI_HTML)
+        self.assertIn("reading list", GUI_HTML)
+        self.assertIn("tag add", GUI_HTML)
 
 
 if __name__ == "__main__":
